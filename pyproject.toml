@@ -1,0 +1,29 @@
+[project]
+name = "fastapi-azure"
+version = "0.1.0"
+requires-python = ">=3.13"
+dependencies = [
+    "asyncpg>=0.31.0",
+    "fastapi>=0.137.2",
+    "httpx2>=2.4.0",
+    "pydantic>=2.13.4",
+    "pytest>=9.1.1",
+    "sqlalchemy>=2.0.51",
+    "uvicorn>=0.49.0",
+    "psycopg2-binary>=2.9.0",
+    "python-dotenv>=1.0.0",
+    "psycopg2-binary>=2.9.0",
+    "python-dotenv>=1.0.0"
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+markers = [
+    "integration: tests that require database access",
+    "unit: tests that validate request/response without DB side effects",
+]
+
+[dependency-groups]
+dev = [
+    "pytest-cov>=7.1.0",
+]
