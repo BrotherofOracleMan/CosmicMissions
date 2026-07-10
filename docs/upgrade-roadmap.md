@@ -2,7 +2,7 @@
 
 A learning-focused guide and next steps for this project. Companion to [api-testing-checklist.md](api-testing-checklist.md).
 
-You have a solid baseline: cosmic missions CRUD API, pytest coverage across HTTP methods, an `APIRouter` refactor, an isolated test database, and per-test transaction rollback. The long-term goal is deploying this stack to **Azure** — this doc explains what changed, why it helps, and what to tackle next.
+You have a solid baseline: cosmic missions CRUD API, pytest coverage across HTTP methods, an `APIRouter` refactor, an isolated test database, per-test transaction rollback, test markers, coverage reporting, and GitHub Actions CI. The long-term goal is deploying this stack to **Azure** — this doc explains what changed, why it helps, and what to tackle next.
 
 ---
 
@@ -73,7 +73,7 @@ flowchart LR
 
 ### Current test-suite structure (done)
 
-- **37 tests** across 6 files by HTTP concern: post, get, put, patch, delete, roundtrip
+- **39 tests** across 7 files by HTTP concern: post, get, put, patch, delete, roundtrip, database
 - Tests use **real PostgreSQL**, but now through a dedicated test database: `cosmic_missions_test_db`
 - `tests/conftest.py` owns shared pytest setup: `db_session`, `client_with_rollback`, dependency override, per-test transaction rollback, and reusable data fixtures
 - `tests/payloads/missions.py` owns reusable mission payloads and shared test IDs
@@ -94,7 +94,10 @@ tests/
   test_cosmic_missions_patch.py
   test_cosmic_missions_delete.py
   test_cosmic_missions_roundtrip.py
+  test_database.py
 ```
+
+`.github/workflows/test.yml` runs the full suite on every push to `main` via a Postgres service container.
 
 ### Problems this solved
 
@@ -107,6 +110,7 @@ tests/
 | Duplicated assertions | Repeated checks live in `tests/assertions.py` |
 | Fixture duplication | PUT/PATCH/DELETE setup uses shared fixtures from `conftest.py` |
 | Manual DELETE teardown | Per-test transaction rollback replaces `client.delete(...)` after fixtures |
+| CI automation | GitHub Actions runs `pytest` on push to `main` with ephemeral Postgres |
 
 ### Test database isolation (done)
 
@@ -173,26 +177,15 @@ What stayed the same:
 - `verify_mission_fields()`
 - `verify_path_int_parsing_error()`
 
-### Other pytest upgrades (learning order)
+### Other pytest upgrades (optional next steps)
 
-Phase 3+ after test DB, fixtures, and transaction rollback:
+Markers, coverage, and CI are done. Remaining ideas:
 
-1. **`pytest.mark.parametrize` expansion** — you already use it for POST 422s; same pattern for PATCH/PUT invalid bodies
-
-2. **Test markers** — `@pytest.mark.integration` vs `@pytest.mark.unit` to run fast validation-only tests without DB:
-   ```bash
-   pytest -m "not integration"
-   ```
-
-3. **`pytest.raises` / error helpers** — less relevant with TestClient (you assert on `response.status_code`), but useful if you add service-layer unit tests
-
-4. **Factory helpers** — small functions like `make_mission_payload(**overrides)` if static payload dicts start to feel rigid
-
-5. **Coverage** — `pytest-cov` to see untested branches (e.g. `IntegrityError` path already tested via duplicate POST)
-
-6. **HTTP status polish** — assert `201` on POST if you change the API; update roundtrip tests accordingly
-
-7. **CI pipeline** — GitHub Actions: spin up Postgres service, create test DB/table, run `pytest` with `TEST_DATABASE_URL`
+1. **`pytest.mark.parametrize` expansion** — same pattern for PATCH/PUT invalid bodies
+2. **`pytest.raises` / error helpers** — useful if you add service-layer unit tests
+3. **Factory helpers** — `make_mission_payload(**overrides)` if static payloads feel rigid
+4. **HTTP status polish** — assert `201` on POST if you change the API
+5. **CI enhancements** — add `pull_request` trigger, `--cov=src` in the workflow, or split unit/integration jobs
 
 ### What to keep from your current suite
 
@@ -225,8 +218,8 @@ flowchart TD
 | 4 | Decouple GET tests from seed CSV/dev data | M | Done |
 | 5 | Payload folder + assertion helpers | S | Done |
 | 6 | Transaction rollback cleanup | M | Done |
-| 7 | Markers, coverage, CI | L | Next |
-| 8 | Foreign keys and related tables | M–L | Future |
+| 7 | Markers, coverage, CI | L | Done |
+| 8 | Foreign keys and related tables | M–L | Next |
 | 9 | Deploy to Azure | L | Final |
 
 ---
@@ -309,7 +302,7 @@ def apollo_11_mission(client_with_rollback: TestClient) -> Generator[dict, None,
     yield APOLLO_11
 ```
 
-All 37 tests use `client_with_rollback`. The old `client` fixture and `get_test_db` helper were removed.
+All 39 tests use `client_with_rollback`. The old `client` fixture and `get_test_db` helper were removed.
 
 ### Clearing a dirty test DB (one-time recovery)
 
@@ -324,22 +317,13 @@ After rollback is in place, you should not need this routinely.
 
 ---
 
-## Step 7: Markers, coverage, CI (Next)
+## Step 7: Markers, coverage, CI (Done)
 
-Step 7 is about making the suite faster to run locally, measurable, and automatic on every push/PR.
+Step 7 made the suite faster to run in subsets, measurable with coverage, and automatic on every push to `main`.
 
-### Part A: Test markers
+### Part A: Test markers (done)
 
-Markers let you tag tests and run subsets.
-
-Example categories for your project:
-
-| Marker | Meaning | Examples in your suite |
-|--------|---------|------------------------|
-| `integration` | Hits DB through TestClient | GET/POST/PUT/PATCH/DELETE success paths, roundtrip |
-| `unit` | No DB needed; validation/error paths only | invalid path param (`/abc`), missing body fields (422) |
-
-Register markers in `pyproject.toml`:
+All tests are tagged `@pytest.mark.integration` or `@pytest.mark.unit` in `pyproject.toml`:
 
 ```toml
 [tool.pytest.ini_options]
@@ -349,128 +333,71 @@ markers = [
 ]
 ```
 
-Then tag tests:
+| Marker | Count | Examples |
+|--------|-------|----------|
+| `integration` | 22 | CRUD, 404 lookups, 409 duplicate, roundtrip |
+| `unit` | 15 | invalid path param (`/abc`), parametrized POST 422s |
 
-```python
-@pytest.mark.integration
-def test_get_cosmic_mission_by_id(client_with_rollback, apollo_11_mission):
-    ...
-
-@pytest.mark.unit
-def test_get_cosmic_mission_by_invalid_mission_id_type(client_with_rollback):
-    ...
-```
-
-Run subsets:
+Run subsets locally:
 
 ```bash
-pytest -m unit          # fast validation-only tests
-pytest -m integration   # DB-backed tests
-pytest -m "not integration"
+pytest -m unit -v
+pytest -m integration -v
 ```
 
-Why this helps:
+### Part B: Coverage with `pytest-cov` (done)
 
-- Faster feedback while editing schemas/routes
-- Clear separation between "API contract checks" and "DB behavior checks"
-- CI can run unit tests first, integration tests second
-
-### Part B: Coverage with `pytest-cov`
-
-Coverage shows which lines/branches your tests actually execute.
-
-Install:
+`pytest-cov` is in the dev dependency group. Run locally:
 
 ```bash
-uv add --dev pytest-cov
-```
-
-Run:
-
-```bash
+uv sync --group dev
 pytest --cov=src --cov-report=term-missing
 ```
 
-What to look for in your app:
+Current baseline: **100% line coverage** on `src/` (39 tests). `database.py` is covered via `tests/test_database.py`, which exercises the real `get_db()` generator.
 
-- `routers.py` — each HTTP method and error branch (`404`, `409`, `422`)
-- `database.py` — usually low coverage (expected; mostly wiring)
-- `IntegrityError` path on duplicate POST — you already test this; coverage confirms it
+Coverage is a guide, not a goal by itself — use it to spot untested branches after refactors.
 
-Coverage is a guide, not a goal by itself. Useful targets for learning:
+### Part C: CI pipeline — GitHub Actions (done)
 
-- See untested `HTTPException` branches
-- Confirm roundtrip tests exercise PUT/PATCH/DELETE paths
-- Spot dead code after refactors
+Workflow file: `.github/workflows/test.yml`
 
-### Part C: CI pipeline (GitHub Actions)
+```mermaid
+flowchart LR
+    push[Push to main] --> gha[GitHub Actions ubuntu-latest]
+    gha --> pg[(Postgres 15 service container)]
+    gha --> setup[uv sync + psql create DB/table]
+    setup --> pytest[uv run pytest]
+    pytest --> result[Pass or fail on Actions tab]
+```
 
-CI runs your tests automatically when you push code or open a PR.
+What the workflow does on each push to `main`:
 
-A typical workflow for this project:
+1. Starts a `postgres:15` service container with health checks
+2. Sets `DATABASE_URL` and `TEST_DATABASE_URL` to the CI test database
+3. Checks out code, installs `uv`, runs `uv sync`
+4. Installs `postgresql-client`, creates `cosmic_missions_test_db`, runs `sql_files/create_cosmic_missions_table.sql`
+5. Runs `uv run pytest` (all 39 tests)
+
+View results: GitHub repo → **Actions** tab, or locally with `gh run list` / `gh run view --log`.
 
 ```text
-1. Checkout repo
-2. Start Postgres service container
-3. Create cosmic_missions_test_db
-4. Create cosmic_missions table (run sql_files/create_cosmic_missions_table.sql)
-5. Set TEST_DATABASE_URL secret/env
-6. Install dependencies
-7. Run pytest
+Local (your Mac)          CI (GitHub runner)
+─────────────────         ──────────────────
+Docker Postgres           Postgres service container
+.env credentials          workflow env: block
+You run pytest            Runs on push to main
 ```
 
-Example shape (`.github/workflows/tests.yml`):
+### Optional CI enhancements (not implemented)
 
-```yaml
-name: Tests
-
-on: [push, pull_request]
-
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: postgres
-        ports:
-          - 5432:5432
-    env:
-      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/cosmic_missions_test_db
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-      - run: pip install -e .
-      - run: psql "$TEST_DATABASE_URL" -c "SELECT 1" || createdb ...
-      - run: pytest -q
-```
-
-Notes for your repo:
-
-- CI needs the same separation you use locally: dev DB vs test DB
-- Table creation must happen in CI (your test DB starts empty)
-- Keep secrets out of the repo; use GitHub Actions env vars
-- Start with `pytest -q`, then add `--cov=src` once markers/coverage are stable
-
-### Suggested order inside Step 7
-
-1. Add markers to a few obvious tests (unit vs integration)
-2. Add `pytest-cov` and run locally once
-3. Create a minimal GitHub Actions workflow that runs `pytest`
-4. Optionally split CI into fast unit job + integration job later
-
-### Effort estimate: L (large)
-
-Not because any single piece is hard, but because it touches tooling, config, and repo automation — best done once Steps 1–6 are stable (rollback is now in place).
+- Add `pull_request:` trigger so PRs run tests before merge
+- Add `pytest --cov=src` to the workflow
+- Split into separate unit and integration jobs
 
 ---
 
-## Step 8: Foreign keys and related tables (Future)
+## Step 8: Foreign keys and related tables (Next)
 
 Right now you have a **single table** — `cosmic_missions` with no relationships. That is a fine starting point. The next natural schema lesson is adding a **child table** linked by a foreign key.
 
@@ -654,7 +581,7 @@ flowchart LR
 
 Optional but recommended:
 
-- **GitHub Actions** deploy workflow (extends Step 7 CI)
+- **GitHub Actions** deploy workflow (extends the existing test workflow in Step 7)
 - **Application Insights** for logs and request tracing
 - **Key Vault** for `DATABASE_URL` instead of plain app settings
 
@@ -727,7 +654,7 @@ uvicorn main:app --reload
 
 **Phase D — CI/CD**
 
-12. Extend GitHub Actions: test job (Postgres service + `pytest`) → deploy job (only on `main`)
+12. Extend GitHub Actions: add a deploy job (only on `main`) alongside the existing test job
 13. Keep `TEST_DATABASE_URL` in the **test** job only — production Azure DB is not your test DB
 
 ### Environment separation (important)

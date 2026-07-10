@@ -1,6 +1,6 @@
 # FastAPI Azure — Cosmic Missions API
 
-A learning-focused FastAPI CRUD API backed by PostgreSQL, with a pytest integration test suite and a roadmap toward Azure deployment.
+A learning-focused FastAPI CRUD API backed by PostgreSQL, with a pytest integration test suite, GitHub Actions CI, and a roadmap toward Azure deployment.
 
 ## Stack
 
@@ -8,6 +8,7 @@ A learning-focused FastAPI CRUD API backed by PostgreSQL, with a pytest integrat
 - **SQLAlchemy** + **PostgreSQL** (`psycopg2`)
 - **Pydantic** for request/response validation
 - **pytest** with per-test transaction rollback
+- **GitHub Actions** CI on push to `main`
 
 ## Project structure
 
@@ -29,6 +30,10 @@ sql_files/
 docs/
   upgrade-roadmap.md
   api-testing-checklist.md
+
+.github/
+  workflows/
+    test.yml         # CI: Postgres service + pytest
 ```
 
 ## Prerequisites
@@ -144,7 +149,24 @@ pytest -m integration -v    # DB-backed tests
 Run with coverage:
 
 ```bash
+uv sync --group dev
 pytest --cov=src --cov-report=term-missing
+```
+
+## CI (GitHub Actions)
+
+On every push to `main`, `.github/workflows/test.yml`:
+
+1. Starts a Postgres 15 service container
+2. Creates `cosmic_missions_test_db` and runs `sql_files/create_cosmic_missions_table.sql`
+3. Installs dependencies with `uv sync`
+4. Runs all 39 tests with `uv run pytest`
+
+View results on GitHub → **Actions** tab, or locally:
+
+```bash
+gh run list
+gh run view --log
 ```
 
 ## Learning docs
@@ -157,8 +179,8 @@ pytest --cov=src --cov-report=term-missing
 - [x] CRUD API with APIRouter
 - [x] Isolated test database
 - [x] Transaction rollback test fixtures
-- [x] Test markers (`unit` / `integration`)
-- [x] Coverage reporting
-- [ ] GitHub Actions CI
+- [x] Test markers (`unit` / `integration`) — 15 unit, 22 integration
+- [x] Coverage reporting (100% on `src/`)
+- [x] GitHub Actions CI (`.github/workflows/test.yml`)
 - [ ] Foreign keys / related tables
 - [ ] Deploy to Azure (App Service + PostgreSQL Flexible Server)

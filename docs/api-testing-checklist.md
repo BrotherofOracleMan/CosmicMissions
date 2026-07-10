@@ -2,7 +2,7 @@
 
 A practical pytest checklist for testing your FastAPI cosmic missions API, mapped to what you already have and what to add next as you learn.
 
-**Next:** see [upgrade-roadmap.md](upgrade-roadmap.md) for APIRouter notes, the pytest upgrade path (test DB, rollback, CI), and the final Azure deployment step.
+**Next:** see [upgrade-roadmap.md](upgrade-roadmap.md) for the remaining path: foreign keys (Step 8) and Azure deployment (Step 9).
 
 For every endpoint, think in three layers: **did the HTTP response behave correctly?**, **is the JSON body right?**, and **did side effects happen** (DB changed, etc.)?
 
@@ -155,6 +155,7 @@ What that means in practice:
 - Route handlers still call `db.commit()`, but savepoints prevent those commits from persisting past the test
 - Fixtures create data via POST; you do **not** need `DELETE` teardown in fixtures anymore
 - `client_with_rollback` is the shared fixture — inject it into every test that hits the API
+- **CI** (`.github/workflows/test.yml`) runs all 39 tests on push to `main` using an ephemeral Postgres container on GitHub's runners — same `TEST_DATABASE_URL` pattern, no `.env` file
 
 ```mermaid
 flowchart LR
@@ -181,8 +182,8 @@ docker exec -it fastapi_postgres_db psql -U postgres -d cosmic_missions_test_db 
 3. **One full CRUD round-trip** (create → get → update → delete) — see `test_cosmic_missions_roundtrip.py`
 4. **Validation tests** (`422`) — no DB writes needed for invalid bodies, very reliable
 5. **Edge cases** (null telemetry, empty list)
-6. **Next up:** test markers, coverage, CI — see [upgrade-roadmap.md](upgrade-roadmap.md) Step 7
-7. **Later:** foreign keys and related tables (e.g. `crew_members` → `cosmic_missions`) — Step 8
+6. **Done:** test markers (`unit` / `integration`), coverage, GitHub Actions CI — see Step 7 in [upgrade-roadmap.md](upgrade-roadmap.md)
+7. **Next:** foreign keys and related tables (e.g. `crew_members` → `cosmic_missions`) — Step 8
 8. **Final:** deploy API + Postgres to Azure — Step 9
 
 ---
@@ -242,20 +243,18 @@ Before calling Azure "done", smoke-test the deployed API the same way you test l
 curl https://<your-app>.azurewebsites.net/cosmic-missions
 ```
 
-Use `/docs` for interactive checks, then automate deploy + test in GitHub Actions (Step 7 + Step 9).
+Use `/docs` for interactive checks. CI runs automatically on push to `main` — check the **Actions** tab on GitHub or run `gh run view --log` locally.
 
-See [upgrade-roadmap.md](upgrade-roadmap.md) Step 9 for database setup, `sslmode=require`, startup commands, and CI/CD.
+See [upgrade-roadmap.md](upgrade-roadmap.md) Step 9 for Azure database setup, `sslmode=require`, startup commands, and deploy CI/CD.
 
 ---
 
-You already have **37 tests** across GET, POST, PUT, PATCH, DELETE, and roundtrip files. Good next additions:
+You have **39 tests** with markers, coverage, and GitHub Actions CI on push to `main`. Good next additions:
 
-1. `@pytest.mark.integration` / `@pytest.mark.unit` markers — see upgrade roadmap Step 7
-2. `pytest-cov` to find untested branches in `routers.py`
-3. GitHub Actions CI with Postgres service container
-4. Foreign keys and a child table (e.g. crew members per mission) — Step 8
-5. Deploy to Azure (App Service + PostgreSQL Flexible Server) — Step 9
-6. `status_code=201` on POST if you polish the API contract
+1. Foreign keys and a child table (e.g. crew members per mission) — Step 8
+2. Deploy to Azure (App Service + PostgreSQL Flexible Server) — Step 9
+3. `status_code=201` on POST if you polish the API contract
+4. Optional CI tweaks: `pull_request` trigger, coverage in the workflow
 
 Run the suite with:
 
