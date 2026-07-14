@@ -77,6 +77,18 @@ MINIMAL_MISSION = {
     "launch_date": "2026-06-23",
 }
 
+# --- Crew create bodies (POST /cosmic-missions/{id}/crew) ---
+
+CREW_MEMBER_1 = {
+    "name": "John Doe",
+    "role": "Astronaut",
+}
+
+CREW_MEMBER_2 = {
+    "name": "Jane Doe",
+    "role": "Engineer",
+}
+
 # --- CRUD payloads (body fields only unless noted) ---
 
 BASE_MISSION = {

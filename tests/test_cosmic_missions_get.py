@@ -72,3 +72,24 @@ def test_get_telemetry_data_with_invalid_mission_id_type(client_with_rollback):
     response = client_with_rollback.get("/cosmic-missions/abc/telemetry")
     assert response.status_code == 422
     verify_path_int_parsing_error(response)
+
+@pytest.mark.integration
+def test_get_crew_members_by_mission_id(client_with_rollback, mission_with_crew):
+    mission_id = mission_with_crew["mission"]["mission_id"]
+    expected_crew = mission_with_crew["crew"]
+
+    response = client_with_rollback.get(f"/cosmic-missions/{mission_id}/crew")
+    assert response.status_code == 200
+
+    crew = response.json()
+    assert isinstance(crew, list)
+    assert len(crew) == 2
+    assert expected_crew[0] in crew
+    assert expected_crew[1] in crew
+
+
+@pytest.mark.integration
+def test_get_crew_members_by_mission_id_failure(client_with_rollback):
+    response = client_with_rollback.get(f"/cosmic-missions/{MISSING_MISSION_ID}/crew")
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Mission not found"

@@ -19,6 +19,8 @@ from payloads.missions import (
     SUCCESSFUL_MISSION,
     TEST_MISSION_ID,
     UNSUCCESSFUL_MISSION,
+    CREW_MEMBER_1,
+    CREW_MEMBER_2,
 )
 
 load_dotenv()
@@ -106,3 +108,36 @@ def created_minimal_mission(client_with_rollback: TestClient) -> Generator[int, 
     assert data["telemetry_data"] is None
     mission_id = data["mission_id"]
     yield mission_id
+
+@pytest.fixture
+def crew_member_1(
+    client_with_rollback: TestClient, apollo_11_mission: dict
+) -> Generator[dict, None, None]:
+    response = client_with_rollback.post(
+        f"/cosmic-missions/{apollo_11_mission['mission_id']}/crew",
+        json=CREW_MEMBER_1,
+    )
+    assert response.status_code == 200
+    yield response.json()
+
+
+@pytest.fixture
+def crew_member_2(
+    client_with_rollback: TestClient, apollo_11_mission: dict
+) -> Generator[dict, None, None]:
+    response = client_with_rollback.post(
+        f"/cosmic-missions/{apollo_11_mission['mission_id']}/crew",
+        json=CREW_MEMBER_2,
+    )
+    assert response.status_code == 200
+    yield response.json()
+
+
+@pytest.fixture
+def mission_with_crew(
+    apollo_11_mission: dict, crew_member_1: dict, crew_member_2: dict
+) -> Generator[dict, None, None]:
+    yield {
+        "mission": apollo_11_mission,
+        "crew": [crew_member_1, crew_member_2],
+    }

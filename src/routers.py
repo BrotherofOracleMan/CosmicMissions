@@ -3,8 +3,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from database import get_db
-from models import CosmicMission
-from schemas import CosmicMissionBase, CosmicMissionCreate, CosmicMissionPut, CosmicMissionUpdate
+from models import CosmicMission, CrewMember
+from schemas import CosmicMissionBase, CosmicMissionCreate, CosmicMissionPut, CosmicMissionUpdate, CrewMemberBase, CrewMemberCreate
 
 router = APIRouter(prefix="/cosmic-missions", tags=["cosmic-missions"])
 
@@ -99,3 +99,42 @@ def delete_cosmic_mission(mission_id:int, db:Session = Depends(get_db)):
     db.delete(db_mission)
     db.commit()
     return {"message": "Mission deleted successfully"}
+
+
+@router.post("/{mission_id}/crew", response_model=CrewMemberBase)
+def add_crew_member_to_mission(mission_id: int, crew_member: CrewMemberCreate, db: Session = Depends(get_db)):
+    db_mission = db.query(CosmicMission).filter(CosmicMission.mission_id == mission_id).first()
+    if not db_mission:
+        raise HTTPException(status_code=404, detail="Mission not found")
+    db_crew_member = CrewMember(
+        mission_id=mission_id,
+        name=crew_member.name,
+        role=crew_member.role
+    )
+    try:
+        db.add(db_crew_member)
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Crew member with this ID already exists")
+    db.refresh(db_crew_member)
+    return db_crew_member
+
+@router.get("/{mission_id}/crew", response_model=list[CrewMemberBase])
+def get_crew_members_by_mission_id(mission_id: int, db: Session = Depends(get_db)):
+    db_mission = db.query(CosmicMission).filter(CosmicMission.mission_id == mission_id).first()
+    if not db_mission:
+        raise HTTPException(status_code=404, detail="Mission not found")
+    return db_mission.crew_members
+
+@router.delete("/{mission_id}/crew/{crew_member_id}", response_model=dict)
+def delete_crew_member_from_mission(mission_id: int, crew_member_id: int, db: Session = Depends(get_db)):
+    db_mission = db.query(CosmicMission).filter(CosmicMission.mission_id == mission_id).first()
+    if not db_mission:
+        raise HTTPException(status_code=404, detail="Mission not found")
+    db_crew_member = db.query(CrewMember).filter(CrewMember.crew_member_id == crew_member_id, CrewMember.mission_id == mission_id).first()
+    if not db_crew_member:
+        raise HTTPException(status_code=404, detail="Crew member not found")
+    db.delete(db_crew_member)
+    db.commit()
+    return {"message": "Crew member deleted successfully"}
