@@ -2,7 +2,7 @@
 
 A practical pytest checklist for testing your FastAPI cosmic missions API, mapped to what you already have and what to add next as you learn.
 
-**Next:** see [upgrade-roadmap.md](upgrade-roadmap.md) for the remaining path: foreign keys (Step 8) and Azure deployment (Step 9).
+**Next:** see [upgrade-roadmap.md](upgrade-roadmap.md) for the remaining path: stubs/mocks (optional), foreign keys (Step 8), and Azure deployment (Step 9).
 
 For every endpoint, think in three layers: **did the HTTP response behave correctly?**, **is the JSON body right?**, and **did side effects happen** (DB changed, etc.)?
 
@@ -183,20 +183,70 @@ docker exec -it fastapi_postgres_db psql -U postgres -d cosmic_missions_test_db 
 4. **Validation tests** (`422`) — no DB writes needed for invalid bodies, very reliable
 5. **Edge cases** (null telemetry, empty list)
 6. **Done:** test markers (`unit` / `integration`), coverage, GitHub Actions CI — see Step 7 in [upgrade-roadmap.md](upgrade-roadmap.md)
-7. **Next:** foreign keys and related tables (e.g. `crew_members` → `cosmic_missions`) — Step 8
-8. **Final:** deploy API + Postgres to Azure — Step 9
+7. **Optional next:** stubs and mocks — deepen what `dependency_overrides` already does, then stub sessions / external APIs (see section 10)
+8. **Next:** foreign keys and related tables (e.g. `crew_members` → `cosmic_missions`) — Step 8
+9. **Final:** deploy API + Postgres to Azure — Step 9
 
 ---
 
-## 10. What not to over-test
+## 10. Stubs and mocks (order of importance)
+
+Prefer **real Postgres + rollback** for CRUD. Add stubs/mocks when you need speed, failure injection, or to avoid calling Azure/network APIs.
+
+| Priority | Technique | Use when |
+|----------|-----------|----------|
+| 1 | **`dependency_overrides`** | Swap any `Depends(...)` (you already override `get_db`) |
+| 2 | **Stub / `MagicMock` Session** | Unit-test route/service logic without Postgres |
+| 3 | **`unittest.mock.patch` / `pytest-mock`** | Isolate a module-level helper or SDK constructed inside a function |
+| 4 | **Stub external clients** | Azure Blob, email, outbound `httpx` — later, when those exist |
+| 5 | **Service-layer unit tests** | After you extract `services/` — stub `db`, keep HTTP tests thinner |
+
+**Already in your suite (priority 1):**
+
+```python
+app.dependency_overrides[get_db] = override_get_db  # in client_with_rollback
+```
+
+**Priority 2 sketch — stubbed session, no Postgres:**
+
+```python
+from unittest.mock import MagicMock
+from fastapi.testclient import TestClient
+
+from database import get_db
+from main import app
+
+def test_missing_mission_with_stubbed_db():
+    db = MagicMock()
+    db.query.return_value.filter.return_value.first.return_value = None
+
+    def override_get_db():
+        yield db
+
+    app.dependency_overrides[get_db] = override_get_db
+    with TestClient(app) as client:
+        response = client.get("/cosmic-missions/999999")
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 404
+```
+
+Tag stubbed tests `@pytest.mark.unit`; keep CRUD on `client_with_rollback` as `@pytest.mark.integration`.
+
+Full walkthrough (diagrams, Azure stubs, when not to mock): [upgrade-roadmap.md](upgrade-roadmap.md) — **Stubs and mocks**.
+
+---
+
+## 11. What not to over-test
 
 - Don't re-test FastAPI or Pydantic internals
 - Don't assert every field on every endpoint — pick the fields that matter
 - Don't duplicate the same `404` test for every endpoint if they share identical logic (one per route is enough while learning)
+- Don't mock away the database for every CRUD test — you lose coverage of SQL, constraints, and rollback behavior
 
 ---
 
-## 11. Foreign keys (when you add related tables)
+## 12. Foreign keys (when you add related tables)
 
 Once you move beyond a single `cosmic_missions` table, tests need to respect **parent → child** order.
 
@@ -226,7 +276,7 @@ See [upgrade-roadmap.md](upgrade-roadmap.md) Step 8 for the full learning path.
 
 ---
 
-## 12. Azure deployment (final step)
+## 13. Azure deployment (final step)
 
 Local pytest and Azure production are **different environments**:
 
@@ -251,10 +301,11 @@ See [upgrade-roadmap.md](upgrade-roadmap.md) Step 9 for Azure database setup, `s
 
 You have **39 tests** with markers, coverage, and GitHub Actions CI on push to `main`. Good next additions:
 
-1. Foreign keys and a child table (e.g. crew members per mission) — Step 8
-2. Deploy to Azure (App Service + PostgreSQL Flexible Server) — Step 9
-3. `status_code=201` on POST if you polish the API contract
-4. Optional CI tweaks: `pull_request` trigger, coverage in the workflow
+1. Stubs and mocks (optional) — dependency overrides → stubbed Session → external APIs
+2. Foreign keys and a child table (e.g. crew members per mission) — Step 8
+3. Deploy to Azure (App Service + PostgreSQL Flexible Server) — Step 9
+4. `status_code=201` on POST if you polish the API contract
+5. Optional CI tweaks: `pull_request` trigger, coverage in the workflow
 
 Run the suite with:
 

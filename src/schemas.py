@@ -41,3 +41,13 @@ class CosmicMissionPut(BaseModel):
     budget_billions: Decimal = Field(default=0.0, description="The budget of the cosmic mission")
     is_successful: bool = Field(default=False, description="Whether the mission was successful")
     telemetry_data: dict | None = Field(default=None, description="The telemetry data of the mission")
+
+class CrewMemberBase(BaseModel):
+    crew_member_id: int = Field(..., description="The ID of the crew member")
+    mission_id: int = Field(..., description="The ID of the mission")
+    name: str = Field(..., description="The name of the crew member")
+    role: str = Field(..., description="The role of the crew member")
+
+class CrewMemberCreate(BaseModel):
+    name: str = Field(..., description="The name of the crew member")
+    role: str = Field(..., description="The role of the crew member")

@@ -2,7 +2,7 @@
 
 A learning-focused guide and next steps for this project. Companion to [api-testing-checklist.md](api-testing-checklist.md).
 
-You have a solid baseline: cosmic missions CRUD API, pytest coverage across HTTP methods, an `APIRouter` refactor, an isolated test database, per-test transaction rollback, test markers, coverage reporting, and GitHub Actions CI. The long-term goal is deploying this stack to **Azure** — this doc explains what changed, why it helps, and what to tackle next.
+You have a solid baseline: cosmic missions CRUD API, pytest coverage across HTTP methods, an `APIRouter` refactor, an isolated test database, per-test transaction rollback, test markers, coverage reporting, and GitHub Actions CI. Optional next skills include **stubs/mocks** and **foreign keys**; the long-term goal is deploying this stack to **Azure** — this doc explains what changed, why it helps, and what to tackle next.
 
 ---
 
@@ -181,11 +181,147 @@ What stayed the same:
 
 Markers, coverage, and CI are done. Remaining ideas:
 
-1. **`pytest.mark.parametrize` expansion** — same pattern for PATCH/PUT invalid bodies
-2. **`pytest.raises` / error helpers** — useful if you add service-layer unit tests
-3. **Factory helpers** — `make_mission_payload(**overrides)` if static payloads feel rigid
-4. **HTTP status polish** — assert `201` on POST if you change the API
-5. **CI enhancements** — add `pull_request` trigger, `--cov=src` in the workflow, or split unit/integration jobs
+1. **Stubs and mocks** — see the section below (ordered by importance for this project)
+2. **`pytest.mark.parametrize` expansion** — same pattern for PATCH/PUT invalid bodies
+3. **`pytest.raises` / error helpers** — useful if you add service-layer unit tests
+4. **Factory helpers** — `make_mission_payload(**overrides)` if static payloads feel rigid
+5. **HTTP status polish** — assert `201` on POST if you change the API
+6. **CI enhancements** — add `pull_request` trigger, `--cov=src` in the workflow, or split unit/integration jobs
+
+### Stubs and mocks (order of importance)
+
+Your suite already uses **real Postgres** + transaction rollback for integration tests. Stubs and mocks are the next testing skill when you want **faster unit tests**, **failure injection**, or to isolate **external services** (Azure, email, HTTP APIs) without calling the real thing.
+
+**Quick definitions**
+
+| Term | What it is | Example in this project |
+|------|------------|-------------------------|
+| **Stub** | Stand-in that returns canned data; you do not inspect how it was used | Fake `get_db` that yields a fixed session |
+| **Mock** | Stand-in that you also assert on (was it called? with what args?) | `MagicMock` session where you assert `query(...).filter(...).first()` was called |
+| **Dependency override** | FastAPI’s way to swap a `Depends(...)` for tests | `app.dependency_overrides[get_db] = ...` (you already do this) |
+
+```mermaid
+flowchart TD
+    integrate[Prefer real DB + rollback for CRUD] --> override[1. Dependency overrides]
+    override --> session[2. Stub/mock the DB Session]
+    session --> unittest[3. unittest.mock / pytest-mock]
+    unittest --> external[4. Stub external APIs when you add them]
+    external --> service[5. Service-layer unit tests]
+```
+
+Learn these in this order — each builds on the one above.
+
+#### 1. Dependency overrides (most important — already done)
+
+This is FastAPI’s primary testing seam. You already swap `get_db` for a test session:
+
+```python
+app.dependency_overrides[get_db] = override_get_db
+```
+
+**Why it ranks first:** almost every FastAPI tutorial and production app starts here. You keep the full HTTP stack (`TestClient` → router → Pydantic) while controlling what the handler depends on. Re-read Step 6 if this still feels fuzzy — stubs/mocks below are optional refinements of the same idea.
+
+When you add more dependencies later (`get_current_user`, `get_blob_client`, …), override those the same way instead of reaching for `patch` first.
+
+#### 2. Stub or mock the SQLAlchemy `Session` (true unit tests, no Postgres)
+
+Integration tests with `client_with_rollback` should stay the default for CRUD. Use a fake session when you want:
+
+- Tests that run without Docker / CI Postgres
+- Failure paths that are painful to force in a real DB (`db.commit()` raises, connection drops)
+- Pure unit tests of a future service function that takes `db: Session`
+
+Minimal stub (return canned rows, ignore call history):
+
+```python
+import pytest
+from fastapi import HTTPException
+from unittest.mock import MagicMock
+
+from routers import get_cosmic_mission_by_id
+
+def test_get_mission_not_found_unit():
+    db = MagicMock()
+    db.query.return_value.filter.return_value.first.return_value = None
+
+    with pytest.raises(HTTPException) as exc_info:
+        get_cosmic_mission_by_id(999999, db)
+
+    assert exc_info.value.status_code == 404
+```
+
+Or wire the stub through FastAPI (still no Postgres):
+
+```python
+def test_get_404_with_stub_session():
+    db = MagicMock()
+    db.query.return_value.filter.return_value.first.return_value = None
+
+    def override_get_db():
+        yield db
+
+    app.dependency_overrides[get_db] = override_get_db
+    with TestClient(app) as client:
+        response = client.get("/cosmic-missions/999999")
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Mission not found"
+```
+
+**Keep both layers:** mark stubbed tests `@pytest.mark.unit` and DB tests `@pytest.mark.integration`. Do not replace your 22 integration tests — stubs catch logic; Postgres catches SQL, constraints, and savepoint behavior.
+
+#### 3. `unittest.mock.patch` / `pytest-mock` (isolate one call site)
+
+Use when the code under test calls something you cannot inject via `Depends`:
+
+```python
+from unittest.mock import patch
+
+@patch("routers.some_helper")
+def test_helper_failure_returns_500(mock_helper, client_with_rollback):
+    mock_helper.side_effect = RuntimeError("boom")
+    # …call endpoint that uses some_helper…
+```
+
+Or with `pytest-mock` (`mocker` fixture):
+
+```python
+def test_helper_failure(mocker, client_with_rollback):
+    mocker.patch("routers.some_helper", side_effect=RuntimeError("boom"))
+    # …
+```
+
+**Why it ranks third:** powerful, but easy to overuse. Prefer dependency overrides when you control the signature. Reach for `patch` when the seam is a module-level import (helpers, SDK clients constructed inside a function).
+
+#### 4. Stub external services (grows important as you approach Azure)
+
+Once Step 9 (or stretch goals) adds outbound I/O — Blob Storage, SendGrid, `httpx` to another API — those must not hit the network in unit tests.
+
+| Pattern | When |
+|---------|------|
+| Wrap the client in a FastAPI dependency, then override it | Best default for Azure SDKs |
+| `respx` / `httpx` mock transport | Outbound HTTP with `httpx` |
+| `MagicMock` with fixed return values | Simple SDK method (`upload_blob`, `send`) |
+
+Sketch for a future dependency:
+
+```python
+# production
+def get_storage():
+    return BlobServiceClient.from_connection_string(os.getenv("AZURE_STORAGE_CONNECTION_STRING"))
+
+# test
+fake_storage = MagicMock()
+fake_storage.get_blob_client.return_value.download_blob.return_value.readall.return_value = b"{}"
+app.dependency_overrides[get_storage] = lambda: fake_storage
+```
+
+Until you have external I/O, skip this tier — there is nothing to stub yet.
+
+#### 5. Service-layer stubs (only after you extract a service)
+
+If you pull logic into `services/cosmic_missions.py`, unit-test the service with a stubbed session, and keep router tests thinner (HTTP + status codes). Until that refactor exists, prefer levels 1–2.
 
 ### What to keep from your current suite
 
@@ -193,6 +329,7 @@ Markers, coverage, and CI are done. Remaining ideas:
 - Explicit assertions (no over-abstracted helpers) — good for learning
 - Roundtrip file — becomes even more valuable with isolated DB
 - Parametrize for validation errors — keep expanding, not replacing
+- Prefer real DB + override over heavy mocking for CRUD — stubs complement, not replace, Step 6
 
 ---
 
@@ -206,7 +343,8 @@ flowchart TD
     conftest --> payloads[Move payloads + verify helpers]
     payloads --> rollback[Per-test transaction rollback]
     rollback --> ci[CI with test Postgres]
-    ci --> fkeys[Foreign keys + related tables]
+    ci --> stubs[Stubs and mocks optional]
+    stubs --> fkeys[Foreign keys + related tables]
     fkeys --> azure[Deploy to Azure]
 ```
 
@@ -219,6 +357,7 @@ flowchart TD
 | 5 | Payload folder + assertion helpers | S | Done |
 | 6 | Transaction rollback cleanup | M | Done |
 | 7 | Markers, coverage, CI | L | Done |
+| 7b | Stubs and mocks (optional skill) | S–M | Next / anytime |
 | 8 | Foreign keys and related tables | M–L | Next |
 | 9 | Deploy to Azure | L | Final |
 
@@ -705,6 +844,8 @@ Mostly portal/CLI wiring, networking, and CI — not Python rewrites. Budget tim
 
 - FastAPI [Bigger Applications](https://fastapi.tiangolo.com/tutorial/bigger-applications/)
 - FastAPI [Testing Dependencies](https://fastapi.tiangolo.com/advanced/testing-dependencies/)
+- Python [unittest.mock](https://docs.python.org/3/library/unittest.mock.html)
+- pytest [Monkeypatching / mocker](https://docs.pytest.org/en/stable/how-to/monkeypatch.html) (or [`pytest-mock`](https://pytest-mock.readthedocs.io/))
 - SQLAlchemy [Relationship Configuration](https://docs.sqlalchemy.org/en/20/orm/basic_relationships.html)
 - PostgreSQL [Foreign Keys](https://www.postgresql.org/docs/current/ddl-constraints.html#DDL-CONSTRAINTS-FK)
 - Azure [App Service — Deploy Python](https://learn.microsoft.com/en-us/azure/app-service/quickstart-python)
