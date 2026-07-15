@@ -49,5 +49,5 @@ class CrewMemberBase(BaseModel):
     role: str = Field(..., description="The role of the crew member")
 
 class CrewMemberCreate(BaseModel):
-    name: str = Field(..., description="The name of the crew member")
-    role: str = Field(..., description="The role of the crew member")
+    name: str = Field(..., description="The name of the crew member", min_length=1, max_length=255)
+    role: str = Field(..., description="The role of the crew member", min_length=1, max_length=255)

@@ -87,9 +87,14 @@ def test_get_crew_members_by_mission_id(client_with_rollback, mission_with_crew)
     assert expected_crew[0] in crew
     assert expected_crew[1] in crew
 
-
 @pytest.mark.integration
-def test_get_crew_members_by_mission_id_failure(client_with_rollback):
+def test_get_crew_members_by_missing_mission_id_failure(client_with_rollback):
     response = client_with_rollback.get(f"/cosmic-missions/{MISSING_MISSION_ID}/crew")
     assert response.status_code == 404
     assert response.json()["detail"] == "Mission not found"
+
+@pytest.mark.integration
+def test_get_crew_members_by_invalid_mission_id_type(client_with_rollback):
+    response = client_with_rollback.get("/cosmic-missions/abc/crew")
+    assert response.status_code == 422
+    verify_path_int_parsing_error(response)
