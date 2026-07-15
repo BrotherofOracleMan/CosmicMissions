@@ -18,7 +18,7 @@ class CosmicMission(Base):
     is_successful: Mapped[bool] = mapped_column(Boolean)
     telemetry_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     
-    crew_members: Mapped[list["CrewMember"]] = relationship(back_populates="mission")
+    crew_members: Mapped[list["CrewMember"]] = relationship(back_populates="mission", cascade="all, delete-orphan")
 
 class CrewMember(Base):
     __tablename__ = "crew_members"

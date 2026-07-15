@@ -98,3 +98,13 @@ def test_get_crew_members_by_invalid_mission_id_type(client_with_rollback):
     response = client_with_rollback.get("/cosmic-missions/abc/crew")
     assert response.status_code == 422
     verify_path_int_parsing_error(response)
+
+@pytest.mark.integration
+def test_get_cosmic_mission_with_crew_size_zero(client_with_rollback, mission_with_crew_size_zero):
+    response = client_with_rollback.get(f"/cosmic-missions/{mission_with_crew_size_zero['mission_id']}")
+    assert response.status_code == 200
+    assert response.json()["crew_size"] == 0
+
+    response = client_with_rollback.get(f"/cosmic-missions/{mission_with_crew_size_zero['mission_id']}/crew")
+    assert response.status_code == 200
+    assert response.json() == []

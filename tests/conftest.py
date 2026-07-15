@@ -12,6 +12,7 @@ from database import get_db
 from main import app
 from payloads.missions import (
     APOLLO_11,
+    MISSION_WITH_CREW_SIZE_ZERO,
     BASE_MISSION,
     DUPLICATE_TEST_MISSION,
     MINIMAL_MISSION,
@@ -141,3 +142,9 @@ def mission_with_crew(
         "mission": apollo_11_mission,
         "crew": [crew_member_1, crew_member_2],
     }
+
+@pytest.fixture
+def mission_with_crew_size_zero(client_with_rollback: TestClient) -> Generator[dict, None, None]:
+    response = client_with_rollback.post("/cosmic-missions", json=MISSION_WITH_CREW_SIZE_ZERO)
+    assert response.status_code == 200
+    yield response.json()

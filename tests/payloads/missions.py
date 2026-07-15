@@ -52,6 +52,13 @@ SUCCESSFUL_MISSION = {
     "telemetry_data": {"landing_site": "Tranquility Base", "duration_days": 8},
 }
 
+MISSION_WITH_CREW_SIZE_ZERO = {
+    "mission_id": 1,
+    "mission_name": "Apollo 11",
+    "destination": "Moon",
+    "launch_date": "1969-07-16",
+    "crew_size": 0,
+}
 UNSUCCESSFUL_MISSION = {
     "mission_id": 2,
     "mission_name": "Unsuccessful Mission 1",
@@ -77,6 +84,16 @@ MINIMAL_MISSION = {
     "launch_date": "2026-06-23",
 }
 
+MISSION_WITH_NONESTENT_CREW_MEMBER = {
+    "mission_id": TEST_MISSION_ID,
+    "mission_name": "Test Mission 99999",
+    "destination": "Test Destination 99999",
+    "launch_date": "2026-06-23",
+    "crew_size": 1,
+    "budget_billions": 100,
+    "is_successful": True,
+}
+
 # --- Crew create bodies (POST /cosmic-missions/{id}/crew) ---
 
 CREW_MEMBER_1 = {
@@ -88,6 +105,7 @@ CREW_MEMBER_2 = {
     "name": "Jane Doe",
     "role": "Engineer",
 }
+
 
 # --- CRUD payloads (body fields only unless noted) ---
 
