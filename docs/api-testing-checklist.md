@@ -2,7 +2,7 @@
 
 A practical pytest checklist for testing your FastAPI cosmic missions API, mapped to what you already have and what to add next as you learn.
 
-**Next:** see [upgrade-roadmap.md](upgrade-roadmap.md) for the remaining path: stubs/mocks (optional), foreign keys (Step 8), and Azure deployment (Step 9).
+**Next:** see [upgrade-roadmap.md](upgrade-roadmap.md) for Azure deployment (Step 9). Stubs/mocks remain optional.
 
 For every endpoint, think in three layers: **did the HTTP response behave correctly?**, **is the JSON body right?**, and **did side effects happen** (DB changed, etc.)?
 
@@ -70,6 +70,9 @@ A `200` with wrong JSON is still a bug.
 | `POST /cosmic-missions` | `200`, returned object matches input | `409` duplicate, `422` bad body |
 | `PUT /cosmic-missions/{id}` | `200`, fields updated | `404` missing ID |
 | `DELETE /cosmic-missions/{id}` | `200`, message | `404` missing ID; follow-up GET returns `404` |
+| `POST /cosmic-missions/{id}/crew` | `200`, crew with `SERIAL` id | `404` missing mission, `422` bad body |
+| `GET /cosmic-missions/{id}/crew` | `200`, list (maybe `[]`) | `404` missing mission |
+| `DELETE /cosmic-missions/{id}/crew/{crew_id}` | `200`, message | `404` mission/crew; wrong pair → `404` |
 
 ---
 
@@ -155,7 +158,7 @@ What that means in practice:
 - Route handlers still call `db.commit()`, but savepoints prevent those commits from persisting past the test
 - Fixtures create data via POST; you do **not** need `DELETE` teardown in fixtures anymore
 - `client_with_rollback` is the shared fixture — inject it into every test that hits the API
-- **CI** (`.github/workflows/test.yml`) runs all 39 tests on push to `main` using an ephemeral Postgres container on GitHub's runners — same `TEST_DATABASE_URL` pattern, no `.env` file
+- **CI** (`.github/workflows/test.yml`) runs all 58 tests on push to `main` using an ephemeral Postgres container on GitHub's runners — same `TEST_DATABASE_URL` pattern, no `.env` file
 
 ```mermaid
 flowchart LR
@@ -183,9 +186,9 @@ docker exec -it fastapi_postgres_db psql -U postgres -d cosmic_missions_test_db 
 4. **Validation tests** (`422`) — no DB writes needed for invalid bodies, very reliable
 5. **Edge cases** (null telemetry, empty list)
 6. **Done:** test markers (`unit` / `integration`), coverage, GitHub Actions CI — see Step 7 in [upgrade-roadmap.md](upgrade-roadmap.md)
-7. **Optional next:** stubs and mocks — deepen what `dependency_overrides` already does, then stub sessions / external APIs (see section 10)
-8. **Next:** foreign keys and related tables (e.g. `crew_members` → `cosmic_missions`) — Step 8
-9. **Final:** deploy API + Postgres to Azure — Step 9
+7. **Done:** foreign keys + nested crew routes — Step 8
+8. **Optional:** stubs and mocks — deepen what `dependency_overrides` already does (see section 10)
+9. **Next / Final:** deploy API + Postgres to Azure — Step 9
 
 ---
 
@@ -246,11 +249,9 @@ Full walkthrough (diagrams, Azure stubs, when not to mock): [upgrade-roadmap.md]
 
 ---
 
-## 12. Foreign keys (when you add related tables)
+## 12. Foreign keys (done — crew members)
 
-Once you move beyond a single `cosmic_missions` table, tests need to respect **parent → child** order.
-
-**Arrange parent first:**
+Parent → child order still applies. Fixtures create the mission first, then crew.
 
 ```python
 def test_add_crew_member(client_with_rollback, apollo_11_mission):
@@ -262,17 +263,17 @@ def test_add_crew_member(client_with_rollback, apollo_11_mission):
     assert response.json()["mission_id"] == apollo_11_mission["mission_id"]
 ```
 
-**Error paths to cover:**
+**Covered today:**
 
 | Test | Assert |
 |------|--------|
-| Child for missing parent | `404` if route checks mission exists first |
-| Delete parent with `ON DELETE CASCADE` | Child rows gone; nested GET empty or `404` |
-| Delete parent with `ON DELETE RESTRICT` | `409`/`400` if children still exist |
+| Child for missing parent | `404` |
+| Invalid crew body / empty strings | `422` |
+| Wrong mission/crew pair on DELETE | `404` |
+| Delete parent with `ON DELETE CASCADE` | Follow-up GET `.../crew` → `404` mission not found |
+| Empty crew list | `200` + `[]` |
 
-Rollback still cleans up both tables — FK constraints do not block rollback inside your test transaction.
-
-See [upgrade-roadmap.md](upgrade-roadmap.md) Step 8 for the full learning path.
+Rollback still cleans up both tables. See [upgrade-roadmap.md](upgrade-roadmap.md) Step 8.
 
 ---
 
@@ -299,13 +300,12 @@ See [upgrade-roadmap.md](upgrade-roadmap.md) Step 9 for Azure database setup, `s
 
 ---
 
-You have **39 tests** with markers, coverage, and GitHub Actions CI on push to `main`. Good next additions:
+You have **58 tests** with markers, ~99% coverage on `src/`, nested crew routes, and GitHub Actions CI on push to `main`. Good next additions:
 
-1. Stubs and mocks (optional) — dependency overrides → stubbed Session → external APIs
-2. Foreign keys and a child table (e.g. crew members per mission) — Step 8
-3. Deploy to Azure (App Service + PostgreSQL Flexible Server) — Step 9
-4. `status_code=201` on POST if you polish the API contract
-5. Optional CI tweaks: `pull_request` trigger, coverage in the workflow
+1. Deploy to Azure (App Service + PostgreSQL Flexible Server) — Step 9
+2. Stubs and mocks (optional) — useful when you add Azure SDKs / outbound I/O
+3. `status_code=201` on POST if you polish the API contract
+4. Optional CI tweaks: `pull_request` trigger, coverage in the workflow
 
 Run the suite with:
 

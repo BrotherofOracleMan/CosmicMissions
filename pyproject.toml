@@ -7,13 +7,10 @@ dependencies = [
     "fastapi>=0.137.2",
     "httpx2>=2.4.0",
     "pydantic>=2.13.4",
-    "pytest>=9.1.1",
     "sqlalchemy>=2.0.51",
     "uvicorn>=0.49.0",
     "psycopg2-binary>=2.9.0",
     "python-dotenv>=1.0.0",
-    "psycopg2-binary>=2.9.0",
-    "python-dotenv>=1.0.0"
 ]
 
 [tool.pytest.ini_options]
@@ -25,5 +22,6 @@ markers = [
 
 [dependency-groups]
 dev = [
+    "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
 ]

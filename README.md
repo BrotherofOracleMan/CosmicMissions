@@ -1,6 +1,6 @@
 # FastAPI Azure — Cosmic Missions API
 
-A learning-focused FastAPI CRUD API backed by PostgreSQL, with a pytest integration test suite, GitHub Actions CI, and a roadmap toward Azure deployment.
+A learning-focused FastAPI CRUD API backed by PostgreSQL (missions + nested crew members), with a pytest integration test suite, GitHub Actions CI, and a roadmap toward Azure deployment.
 
 ## Stack
 
@@ -26,6 +26,7 @@ tests/
 
 sql_files/
   create_cosmic_missions_table.sql
+  create_crew_members_table.sql
 
 docs/
   upgrade-roadmap.md
@@ -84,20 +85,22 @@ docker run -d \
   postgres:16
 ```
 
-### 4. Create databases and table
+### 4. Create databases and tables
 
 ```bash
 docker exec -it fastapi_postgres_db psql -U postgres -c "CREATE DATABASE cosmic_missions_db;"
 docker exec -it fastapi_postgres_db psql -U postgres -c "CREATE DATABASE cosmic_missions_test_db;"
 
-docker exec -it fastapi_postgres_db psql -U postgres -d cosmic_missions_db \
-  -f /path/to/sql_files/create_cosmic_missions_table.sql
-
-docker exec -it fastapi_postgres_db psql -U postgres -d cosmic_missions_test_db \
-  -f /path/to/sql_files/create_cosmic_missions_table.sql
+# Missions first, then crew (FK depends on parent table)
+for db in cosmic_missions_db cosmic_missions_test_db; do
+  docker exec -i fastapi_postgres_db psql -U postgres -d "$db" \
+    < sql_files/create_cosmic_missions_table.sql
+  docker exec -i fastapi_postgres_db psql -U postgres -d "$db" \
+    < sql_files/create_crew_members_table.sql
+done
 ```
 
-Or copy the SQL file into the container and run it with `psql -f`.
+Or copy the SQL files into the container and run them with `psql -f`.
 
 ## Run the API
 
@@ -120,7 +123,10 @@ uvicorn main:app --reload
 | `POST` | `/cosmic-missions` | Create mission |
 | `PUT` | `/cosmic-missions/{id}` | Full replace |
 | `PATCH` | `/cosmic-missions/{id}` | Partial update |
-| `DELETE` | `/cosmic-missions/{id}` | Delete mission |
+| `DELETE` | `/cosmic-missions/{id}` | Delete mission (`ON DELETE CASCADE` removes crew) |
+| `POST` | `/cosmic-missions/{id}/crew` | Add crew member (`name`, `role`) |
+| `GET` | `/cosmic-missions/{id}/crew` | List crew for a mission |
+| `DELETE` | `/cosmic-missions/{id}/crew/{crew_id}` | Delete one crew member |
 
 ### HTTP status codes
 
@@ -158,9 +164,9 @@ pytest --cov=src --cov-report=term-missing
 On every push to `main`, `.github/workflows/test.yml`:
 
 1. Starts a Postgres 15 service container
-2. Creates `cosmic_missions_test_db` and runs `sql_files/create_cosmic_missions_table.sql`
+2. Creates `cosmic_missions_test_db` and runs both create-table SQL files (missions, then crew)
 3. Installs dependencies with `uv sync`
-4. Runs all 39 tests with `uv run pytest`
+4. Runs all 58 tests with `uv run pytest`
 
 View results on GitHub → **Actions** tab, or locally:
 
@@ -171,7 +177,7 @@ gh run view --log
 
 ## Learning docs
 
-- [docs/upgrade-roadmap.md](docs/upgrade-roadmap.md) — project evolution: APIRouter, test DB, rollback, CI, foreign keys, Azure
+- [docs/upgrade-roadmap.md](docs/upgrade-roadmap.md) — project evolution: APIRouter, test DB, rollback, CI, crew FKs, Azure deploy learning path (auth + Terraform)
 - [docs/api-testing-checklist.md](docs/api-testing-checklist.md) — pytest patterns and what to assert
 
 ## Roadmap
@@ -179,8 +185,8 @@ gh run view --log
 - [x] CRUD API with APIRouter
 - [x] Isolated test database
 - [x] Transaction rollback test fixtures
-- [x] Test markers (`unit` / `integration`) — 15 unit, 22 integration
-- [x] Coverage reporting (100% on `src/`)
+- [x] Test markers (`unit` / `integration`) — 15 unit, 35 integration (58 total)
+- [x] Coverage reporting (~99% on `src/`)
 - [x] GitHub Actions CI (`.github/workflows/test.yml`)
-- [ ] Foreign keys / related tables
-- [ ] Deploy to Azure (App Service + PostgreSQL Flexible Server)
+- [x] Foreign keys / nested crew members (`crew_members`)
+- [ ] Deploy to Azure (portal → API auth + Managed Identity → CI/CD → Terraform)
