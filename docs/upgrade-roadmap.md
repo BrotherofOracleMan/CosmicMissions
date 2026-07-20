@@ -2,7 +2,7 @@
 
 A learning-focused guide and next steps for this project. Companion to [api-testing-checklist.md](api-testing-checklist.md).
 
-You have a solid baseline: cosmic missions CRUD API with nested **crew members** (FK + `ON DELETE CASCADE`), pytest coverage across HTTP methods, an `APIRouter` refactor, an isolated test database, per-test transaction rollback, test markers, coverage reporting, and GitHub Actions CI. Optional next skill: **stubs/mocks**. The long-term goal is deploying this stack to **Azure** — portal-first learning, then **API + database authentication**, CI/CD, and **Terraform**. This doc explains what changed, why it helps, and what to tackle next.
+You have a solid baseline: cosmic missions CRUD API with nested **crew members** (FK + `ON DELETE CASCADE`), pytest coverage across HTTP methods, an `APIRouter` refactor, an isolated test database, per-test transaction rollback, test markers, coverage reporting, and GitHub Actions CI. **Azure Phases 0–C and D1 are done**: Flexible Server + App Service + GitHub OIDC deploy + `X-API-KEY` on mission/crew routes. Optional next skill: **stubs/mocks**. Remaining Azure work: **Managed Identity for Postgres (D2)**, tighter CI/CD gating (E), and **Terraform (F)**. This doc explains what changed, why it helps, and what to tackle next.
 
 ---
 
@@ -14,8 +14,9 @@ Routes are split between a thin app entry point and a dedicated router module:
 
 ```
 src/
-  main.py       # FastAPI app, include_router
-  routers.py    # all /cosmic-missions routes
+  main.py       # FastAPI app, include_router, GET /health (open)
+  routers.py    # /cosmic-missions routes (API key required)
+  auth.py       # get_api_key via X-API-KEY header
   database.py
   models.py
   schemas.py
@@ -26,6 +27,10 @@ src/
 ```python
 app = FastAPI()
 app.include_router(cosmic_missions_router)
+
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
 ```
 
 **`routers.py`** owns the feature:
@@ -367,7 +372,7 @@ flowchart TD
 | 7 | Markers, coverage, CI | L | Done |
 | 8 | Foreign keys and related tables (`crew_members`) | M–L | Done |
 | 7b | Stubs and mocks (optional skill) | S–M | Optional / anytime |
-| 9 | Deploy to Azure (portal → auth → CI/CD → Terraform) | L | Next / Final |
+| 9 | Deploy to Azure (portal → auth → CI/CD → Terraform) | L | In progress — 0–C + D1 done; D2 / E polish / F next |
 
 ---
 
@@ -605,144 +610,147 @@ erDiagram
 
 ---
 
-## Step 9: Deploy to Azure (Next / Final)
+## Step 9: Deploy to Azure (In progress)
 
-Move from **local Docker Postgres + uvicorn on your machine** to a hosted FastAPI API and managed PostgreSQL in Azure. Learn in this order: **Portal first** (understand each piece) → **protect prod access** (API key, then Managed Identity for Postgres) → **CI/CD deploy** → **Terraform** (reproduce the stack as code).
+Move from **local Docker Postgres + uvicorn on your machine** to a hosted FastAPI API and managed PostgreSQL in Azure. Learn in this order: **Portal first** → **protect prod access** (API key, then Managed Identity for Postgres) → **CI/CD deploy** → **Terraform**.
 
-Your app already reads `DATABASE_URL` from the environment — that pattern maps directly to Azure App Settings.
+Your app already reads `DATABASE_URL` (and `API_KEY`) from the environment — that pattern maps directly to Azure App Settings / Environment variables.
+
+### Current status (what you have live)
+
+| Phase | Status | Notes |
+|-------|--------|--------|
+| 0 — Repo prep | **Done** | `requirements.txt`, `GET /health`, `.gitignore` |
+| A — Flexible Server | **Done** | `rg-cosmic-missions`, server `rg-cosmic-missions-database`, DB `cosmic_missions_db`, both SQL files applied |
+| B — App Service | **Done** | Web App `rg-cosmic-missions`, Python 3.13, Free plan; `DATABASE_URL`, `PYTHONPATH=src`, startup `uvicorn` |
+| C — Verify | **Done** | `/health`, CRUD, crew smoke-tested on Azure |
+| D1 — API key | **Done** | `src/auth.py` + router `dependencies`; `API_KEY` in `.env` / Azure; pytest overrides `get_api_key` |
+| D2 — Managed Identity → Postgres | **Next** | Still using password in `DATABASE_URL` |
+| E — CI/CD polish | **Partial** | Deploy workflow exists; not yet gated on the Test job |
+| F — Terraform | **Not started** | |
+
+**Live hostname (example):** `https://rg-cosmic-missions-cghta5dsfxb5fven.canadacentral-01.azurewebsites.net`  
+**Deploy workflow:** `.github/workflows/main_rg-cosmic-missions.yml` (OIDC + user-assigned identity `oidc-msi-ad6c`)  
+**Test workflow:** `.github/workflows/test.yml` (unchanged — CI Postgres only)
 
 ### Target architecture
 
 ```mermaid
 flowchart LR
-    client[API clients] -->|API key Bearer| app[Azure App Service Linux]
-    app -->|Managed Identity or SSL URL| pg[(PostgreSQL Flexible Server)]
-    gh[GitHub Actions] -->|deploy on push| app
+    client[API clients] -->|"X-API-KEY"| app[Azure App Service Linux]
+    app -->|password URL today MI later| pg[(PostgreSQL Flexible Server)]
+    gh[GitHub Actions] -->|OIDC deploy| app
     gh -->|pytest in CI| testPg[(Postgres service container)]
-    tf[Terraform] -->|provisions| rg[Resource group]
+    tf[Terraform] -->|later| rg[Resource group]
     rg --> app
     rg --> pg
 ```
 
-| Local (today) | Azure (target) |
-|---------------|----------------|
-| Docker `postgres:16` on `localhost:5432` | Azure Database for PostgreSQL — Flexible Server |
-| `uvicorn` run manually | Azure App Service (Linux) |
-| `.env` file on your Mac | App Service **Configuration** / Key Vault / Managed Identity |
-| Open CRUD endpoints | API key (or Bearer) required for mission/crew routes in prod |
-| Password in `DATABASE_URL` | Start with SSL password URL; graduate to **Managed Identity** |
-| Manual Azure Portal clicks | Later: **Terraform** recreates the same resources |
-| `cosmic_missions_test_db` | Stays in **CI only** — never point pytest at Azure prod |
+| Local | Azure (now) |
+|-------|-------------|
+| Docker `postgres` on `localhost:5432` | Flexible Server `rg-cosmic-missions-database` |
+| `uvicorn` manually | App Service Linux, Python 3.13 |
+| `.env` | App Service **Environment variables** |
+| API key in `.env` | Same `API_KEY` setting in Azure |
+| Password in `DATABASE_URL` | Password + `sslmode=require` (D2 removes password) |
+| pytest / `TEST_DATABASE_URL` | CI Postgres only — never Azure prod |
 
-**Why Flexible Server:** you already use PostgreSQL, `psycopg2`, and JSONB (`telemetry_data`). Closest lift — no database rewrite.
+**Why Flexible Server:** PostgreSQL + `psycopg2` + JSONB — closest lift.  
+**Why App Service:** simplest FastAPI + `uvicorn` host.  
+**IAM today:** OIDC managed identity for **deploy only**. Runtime DB still uses password; callers use **API key** (app auth, not Entra).
 
-**Why App Service (Linux):** simplest path for FastAPI + `uvicorn`. Container Apps is a later alternative if you prefer shipping a Docker image.
+### Azure resources (created)
 
-**Why portal first, then Terraform:** clicking once teaches what each resource is; Terraform then encodes what you already understand so you can destroy/recreate safely.
-
-### What you need in Azure
-
-1. **Resource group** — e.g. `rg-cosmic-missions`
-2. **PostgreSQL Flexible Server** — e.g. `cosmic-missions-pg`
-3. **Database** — e.g. `cosmic_missions_db` (run both SQL files: missions, then crew)
-4. **App Service plan** — Linux, Python 3.13
-5. **Web App** — e.g. `cosmic-missions-api`
-
-Add as you progress through the learning path:
-
-- **API key** (or Bearer token) app setting — callers must authenticate before touching prod data
-- **Managed Identity** on the Web App + Azure AD auth to Postgres (replaces password in `DATABASE_URL`)
-- **GitHub Actions** deploy job (after a successful manual deploy)
-- **Terraform** under `infra/` to provision the resource group, Flexible Server, App Service plan, and Web App
-- Optional: Application Insights, Key Vault
+1. Resource group `rg-cosmic-missions`
+2. PostgreSQL Flexible Server `rg-cosmic-missions-database` (Burstable B1ms)
+3. Database `cosmic_missions_db` + both create-table SQL files
+4. App Service plan (Linux, Free) + Web App `rg-cosmic-missions`
+5. GitHub Actions deploy via Deployment Center (user-assigned identity + Contributor RBAC)
+6. App settings: `DATABASE_URL`, `PYTHONPATH=src`, `API_KEY`, startup command
 
 ---
 
-### Phase 0 — Repo prep (before clicking Azure)
+### Phase 0 — Repo prep (Done)
 
-Small changes so the first deploy does not fail on packaging/imports:
-
-| Task | Why |
-|------|-----|
-| Export `requirements.txt` from `pyproject.toml` | App Service Oryx build expects it; this repo uses `uv` today |
-| Set Application setting `PYTHONPATH=src` (or startup cwd = `src`) | Imports are `from database import …` under `src/` |
-| Startup command: `uvicorn main:app --host 0.0.0.0 --port 8000` | Bind all interfaces; avoid 502 |
-| Add `GET /health` → `{"status":"ok"}` | Smoke check with no DB |
-| Confirm `.gitignore` excludes `.env` | Never commit Azure passwords or API keys |
-
-`database.py` already uses `os.getenv("DATABASE_URL")` — no rewrite needed for a basic password+SSL deploy.
+| Task | Status |
+|------|--------|
+| `requirements.txt` via `uv export --no-dev` | Done |
+| `PYTHONPATH=src` + startup `uvicorn main:app --host 0.0.0.0 --port 8000` | Done (Azure) |
+| `GET /health` → `{"status":"ok"}` | Done (`main.py`, no API key) |
+| `.gitignore` excludes `.env` | Done |
 
 ---
 
-### Phase A — Database (Portal): understand the data plane
+### Phase A — Database (Done)
 
-Create resources in the [Azure portal](https://portal.azure.com), then **connect from your Mac before deploying the app**.
+Completed in Portal: resource group, Flexible Server (B1ms), `cosmic_missions_db`, firewall (client IP + Azure services), both SQL files via `psql`, Mac → Azure smoke test with `sslmode=require`.
 
-| Step | What | Why |
-|------|------|-----|
-| 1 | Resource group `rg-cosmic-missions` | One place to delete everything later |
-| 2 | PostgreSQL Flexible Server (Burstable / cheapest SKU is fine) | Managed Postgres matching your local Docker mental model |
-| 3 | Database `cosmic_missions_db` | Same name as local |
-| 4 | Networking: allow **your public IP**; enable **Allow public access from Azure services** | Mac can `psql`; App Service can reach Postgres |
-| 5 | Apply `sql_files/create_cosmic_missions_table.sql` then `sql_files/create_crew_members_table.sql` | Empty tables = deploy looks “up” but every API call fails |
-| 6 | Point a **temporary local** `DATABASE_URL` at Azure (`sslmode=require`) and hit one GET/POST with local `uvicorn` | Proves DB + SSL + firewall before App Service complexity |
-
-Connection string shape (password era):
+Connection string shape (still password-based until D2):
 
 ```text
-postgresql://<admin>@<server>.postgres.database.azure.com:5432/cosmic_missions_db?sslmode=require
+postgresql://<admin>:<password>@rg-cosmic-missions-database.postgres.database.azure.com:5432/cosmic_missions_db?sslmode=require
 ```
 
-Keep Azure prod DB out of pytest — CI stays on the GitHub Actions Postgres service.
+Keep Azure prod DB out of pytest.
 
 ---
 
-### Phase B — App Service (Portal): understand the compute plane
+### Phase B — App Service (Done)
 
-| Step | What | Why |
-|------|------|-----|
-| 1 | App Service plan (Linux) + Web App, **Python 3.13** | Matches `requires-python` |
-| 2 | Application setting `DATABASE_URL` = Azure Postgres URL | Replaces `.env` in the cloud |
-| 3 | Startup + `PYTHONPATH=src` | Avoids 502 from wrong import path / bind address |
-| 4 | First deploy via **Deployment Center → GitHub** or ZIP upload | See how code lands on the box without writing Actions YAML yet |
+Linux Web App, Python 3.13, Environment variables (`DATABASE_URL`, `PYTHONPATH`), startup command, GitHub Actions deploy (`main_rg-cosmic-missions.yml`).
 
-What you are learning: App Settings = env vars; startup command = process launch; Deployment Center = how source gets published.
+Deploy IAM: user-assigned identity + federated credential for `repo:…/CosmicMissions:ref:refs/heads/main` + **Contributor** (Website Contributor alone caused “No subscriptions found”).
 
 ---
 
-### Phase C — Verify (prove it works)
+### Phase C — Verify (Done)
 
-1. `https://<app>.azurewebsites.net/docs` — Swagger loads → process is up
-2. `GET /health` — no DB required
-3. `POST /cosmic-missions` then `GET /cosmic-missions` — App Service → Flexible Server
-4. One crew nested route — both tables + FK path
+Confirmed against the live App Service URL:
 
-**Debug order if something breaks:** Log stream (import/startup) → missing App Setting → firewall / `sslmode` → tables not created.
+1. `GET /health` → `{"status":"ok"}` (no API key)
+2. `/docs` loads
+3. Mission CRUD + crew nested routes against Azure Postgres
+
+**Debug order:** Log stream → missing App Setting → firewall / `sslmode` → tables not created → missing `API_KEY` (401 on all mission routes).
 
 ---
 
 ### Phase D — Authentication when hitting prod data
 
-An open public API that writes to Azure Postgres is not enough for a learning “prod” setup. Add auth in **two layers**, in this order:
+Two layers. **D1 is done; D2 is next.**
 
-#### D1 — API authentication (callers → FastAPI)
+#### D1 — API authentication (callers → FastAPI) (Done)
 
-Protect mission/crew routes so anonymous internet traffic cannot read/write your prod database through the API.
+Protect mission/crew routes so anonymous internet traffic cannot read/write prod data through the API.
 
-Suggested learning approach:
+**What shipped:**
 
-1. Store a secret as App Setting `API_KEY` (local: same name in `.env`)
-2. Add a FastAPI dependency, e.g. `require_api_key`, that checks `Authorization: Bearer <key>` (or `X-API-Key`)
-3. Apply it to the cosmic-missions router (leave `/health` and maybe `/docs` open for smoke checks)
-4. Override/disable the dependency in pytest so existing tests stay simple; add a few unit tests for 401/403
+| Piece | Location |
+|-------|----------|
+| Dependency | [`src/auth.py`](../src/auth.py) — `APIKeyHeader(name="X-API-KEY")` + `get_api_key` |
+| Applied on router | [`src/routers.py`](../src/routers.py) — `dependencies=[Depends(get_api_key)]` |
+| Left open | `GET /health` on [`src/main.py`](../src/main.py) |
+| Local / Azure config | `API_KEY` in `.env` and App Service Environment variables |
+| Docs placeholder | `.env.example` includes `API_KEY=your-api-key-here` |
+| Tests | [`tests/conftest.py`](../tests/conftest.py) overrides `get_api_key` so existing tests need no header |
 
 ```text
-Client  --Bearer API_KEY-->  App Service  -->  Postgres
+Client  --X-API-KEY: <secret>-->  App Service  -->  Postgres
 ```
 
-Why this first: small FastAPI change, same `Depends` pattern you already know, immediately stops unauthenticated CRUD against prod.
+Example:
 
-#### D2 — Database authentication (App Service → Postgres)
+```bash
+# 401 without key
+curl https://<app-host>/cosmic-missions
+
+# 200 with key
+curl https://<app-host>/cosmic-missions -H "X-API-KEY: $API_KEY"
+```
+
+Optional stretch: dedicated unit tests for missing/wrong key → `401`.
+
+#### D2 — Database authentication (App Service → Postgres) (Next)
 
 Graduate off a long-lived password in `DATABASE_URL`:
 
@@ -762,13 +770,14 @@ Never commit API keys or DB passwords. Rotate anything that appeared in chat, sc
 
 ---
 
-### Phase E — CI/CD deploy (after Phase C works)
+### Phase E — CI/CD deploy (Partial — deploy works)
 
-Extend `.github/workflows/test.yml` (or add `deploy.yml`):
+**Done:** `.github/workflows/main_rg-cosmic-missions.yml` builds and deploys to App Service on push to `main` (OIDC).
 
-- Keep the existing **test** job on the CI Postgres service
-- Add a **deploy** job that runs only after tests pass on `main` (e.g. `azure/webapps-deploy` + publish-profile secret)
-- Do **not** point CI/pytest at Azure prod
+**Still optional / next polish:**
+
+- Make deploy `needs:` the Test workflow (or a test job) so broken tests never ship
+- Keep `TEST_DATABASE_URL` in the **test** job only — never point pytest at Azure prod
 
 ---
 
@@ -849,7 +858,7 @@ uvicorn main:app --reload
 | `502 Bad Gateway` | `uvicorn` not binding to `0.0.0.0`, wrong startup command, crash on import, or missing `PYTHONPATH=src` |
 | Works locally, fails in Azure | `.env` not deployed (it shouldn't be) — setting missing in App Service config |
 | Migrations / empty tables | Both create-table SQL files not run on Azure DB yet |
-| Prod open to the world | Phase D1 not done — no API key on mission/crew routes |
+| Prod returns 401 on all mission routes | `API_KEY` missing in Azure Environment variables, or auth code not deployed |
 | Identity connect fails after D2 | AAD admin not set on Flexible Server, role missing, or token/driver wiring incomplete |
 | Terraform drifts from Portal | Manual Portal edits after `apply` — either import changes or stop clicking outside Terraform |
 | Slow cold starts | Normal on free/low tiers; upgrade plan or enable Always On (paid tiers) |
@@ -862,14 +871,12 @@ Mostly portal/CLI wiring, networking, auth, CI, and IaC — not large Python rew
 
 ### Immediate next actions
 
-1. Repo prep: `requirements.txt`, `PYTHONPATH`/startup, optional `/health`
-2. Portal: resource group → Flexible Server → database → firewall → both SQL files
-3. Prove Mac → Azure Postgres with local uvicorn
-4. Create App Service, set `DATABASE_URL`, set startup, deploy once, verify `/docs` + CRUD
-5. Add API key auth on mission/crew routes; set `API_KEY` in App Settings
-6. Add GitHub Actions deploy job (tests still use CI Postgres)
-7. Move App Service → Postgres to Managed Identity
-8. Encode the stack in `infra/` with Terraform; practice `plan` / `apply` / `destroy`
+1. ~~Phases 0–C + D1~~ (done)
+2. Point local `.env` `DATABASE_URL` back to Docker when not cloud-testing
+3. Stop/delete Azure Postgres when idle to control cost (~B1ms)
+4. **Phase D2:** Managed Identity for App Service → Postgres (drop password from `DATABASE_URL`)
+5. **Phase E polish:** gate deploy on Test workflow success
+6. **Phase F:** encode stack in `infra/` with Terraform (`plan` / `apply` / `destroy`)
 
 ### Optional stretch goals
 

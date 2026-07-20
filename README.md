@@ -1,27 +1,30 @@
 # FastAPI Azure — Cosmic Missions API
 
-A learning-focused FastAPI CRUD API backed by PostgreSQL (missions + nested crew members), with a pytest integration test suite, GitHub Actions CI, and a roadmap toward Azure deployment.
+A learning-focused FastAPI CRUD API backed by PostgreSQL (missions + nested crew members), with a pytest integration test suite, GitHub Actions CI/CD, and a live Azure deploy (App Service + Flexible Server). API routes are protected with an `X-API-KEY` header.
 
 ## Stack
 
 - **FastAPI** + **Uvicorn**
 - **SQLAlchemy** + **PostgreSQL** (`psycopg2`)
 - **Pydantic** for request/response validation
+- **API key auth** (`X-API-KEY` via `src/auth.py`)
 - **pytest** with per-test transaction rollback
-- **GitHub Actions** CI on push to `main`
+- **GitHub Actions** CI (`test.yml`) + Azure deploy (`main_rg-cosmic-missions.yml`)
+- **Azure:** App Service (Python 3.13) + PostgreSQL Flexible Server
 
 ## Project structure
 
 ```
 src/
-  main.py          # FastAPI app entry point
-  routers.py       # /cosmic-missions routes
+  main.py          # FastAPI app, GET /health (open)
+  routers.py       # /cosmic-missions routes (API key required)
+  auth.py          # get_api_key dependency
   models.py        # SQLAlchemy models
   schemas.py       # Pydantic schemas
   database.py      # Engine, session, get_db
 
 tests/
-  conftest.py      # client_with_rollback, db_session, fixtures
+  conftest.py      # client_with_rollback, db_session, API key override
   test_*.py        # Tests by HTTP method + roundtrip
 
 sql_files/
@@ -34,7 +37,8 @@ docs/
 
 .github/
   workflows/
-    test.yml         # CI: Postgres service + pytest
+    test.yml                      # CI: Postgres service + pytest
+    main_rg-cosmic-missions.yml   # CD: build + deploy to App Service
 ```
 
 ## Prerequisites
@@ -66,11 +70,12 @@ uv sync --group dev
 cp .env.example .env
 ```
 
-Edit `.env` with your local Postgres credentials:
+Edit `.env` with your local Postgres credentials and API key:
 
 ```env
 DATABASE_URL=postgresql://postgres:YOUR_PASSWORD@localhost:5432/cosmic_missions_db
 TEST_DATABASE_URL=postgresql://postgres:YOUR_PASSWORD@localhost:5432/cosmic_missions_test_db
+API_KEY=your-api-key-here
 ```
 
 ### 3. Start PostgreSQL
@@ -109,24 +114,26 @@ cd src
 uvicorn main:app --reload
 ```
 
-- API: http://localhost:8000
-- Swagger UI: http://localhost:8000/docs
+- Health (no API key): http://localhost:8000/health
+- API: http://localhost:8000/docs
+- Mission/crew routes require header: `X-API-KEY: <your API_KEY>`
 
 ## API endpoints
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/cosmic-missions` | List all missions |
-| `GET` | `/cosmic-missions/success` | List successful missions only |
-| `GET` | `/cosmic-missions/{id}` | Get mission by ID |
-| `GET` | `/cosmic-missions/{id}/telemetry` | Get telemetry JSON |
-| `POST` | `/cosmic-missions` | Create mission |
-| `PUT` | `/cosmic-missions/{id}` | Full replace |
-| `PATCH` | `/cosmic-missions/{id}` | Partial update |
-| `DELETE` | `/cosmic-missions/{id}` | Delete mission (`ON DELETE CASCADE` removes crew) |
-| `POST` | `/cosmic-missions/{id}/crew` | Add crew member (`name`, `role`) |
-| `GET` | `/cosmic-missions/{id}/crew` | List crew for a mission |
-| `DELETE` | `/cosmic-missions/{id}/crew/{crew_id}` | Delete one crew member |
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/health` | No | Liveness check |
+| `GET` | `/cosmic-missions` | API key | List all missions |
+| `GET` | `/cosmic-missions/success` | API key | List successful missions only |
+| `GET` | `/cosmic-missions/{id}` | API key | Get mission by ID |
+| `GET` | `/cosmic-missions/{id}/telemetry` | API key | Get telemetry JSON |
+| `POST` | `/cosmic-missions` | API key | Create mission |
+| `PUT` | `/cosmic-missions/{id}` | API key | Full replace |
+| `PATCH` | `/cosmic-missions/{id}` | API key | Partial update |
+| `DELETE` | `/cosmic-missions/{id}` | API key | Delete mission (`ON DELETE CASCADE` removes crew) |
+| `POST` | `/cosmic-missions/{id}/crew` | API key | Add crew member (`name`, `role`) |
+| `GET` | `/cosmic-missions/{id}/crew` | API key | List crew for a mission |
+| `DELETE` | `/cosmic-missions/{id}/crew/{crew_id}` | API key | Delete one crew member |
 
 ### HTTP status codes
 
@@ -159,14 +166,12 @@ uv sync --group dev
 pytest --cov=src --cov-report=term-missing
 ```
 
-## CI (GitHub Actions)
+## CI / CD (GitHub Actions)
 
-On every push to `main`, `.github/workflows/test.yml`:
+On every push to `main`:
 
-1. Starts a Postgres 15 service container
-2. Creates `cosmic_missions_test_db` and runs both create-table SQL files (missions, then crew)
-3. Installs dependencies with `uv sync`
-4. Runs all 58 tests with `uv run pytest`
+- **Test** (`.github/workflows/test.yml`): Postgres 15 service → create tables → `uv run pytest`
+- **Deploy** (`.github/workflows/main_rg-cosmic-missions.yml`): build → OIDC login → App Service
 
 View results on GitHub → **Actions** tab, or locally:
 
@@ -177,7 +182,7 @@ gh run view --log
 
 ## Learning docs
 
-- [docs/upgrade-roadmap.md](docs/upgrade-roadmap.md) — project evolution: APIRouter, test DB, rollback, CI, crew FKs, Azure deploy learning path (auth + Terraform)
+- [docs/upgrade-roadmap.md](docs/upgrade-roadmap.md) — evolution + Azure Phases 0–F (0–C + D1 done)
 - [docs/api-testing-checklist.md](docs/api-testing-checklist.md) — pytest patterns and what to assert
 
 ## Roadmap
@@ -189,4 +194,9 @@ gh run view --log
 - [x] Coverage reporting (~99% on `src/`)
 - [x] GitHub Actions CI (`.github/workflows/test.yml`)
 - [x] Foreign keys / nested crew members (`crew_members`)
-- [ ] Deploy to Azure (portal → API auth + Managed Identity → CI/CD → Terraform)
+- [x] Azure App Service + PostgreSQL Flexible Server (Phases 0–C)
+- [x] API key auth (`X-API-KEY` / Phase D1)
+- [x] GitHub Actions deploy to Azure (OIDC)
+- [ ] Managed Identity App Service → Postgres (Phase D2)
+- [ ] Gate deploy on test success / CI polish (Phase E)
+- [ ] Terraform IaC (Phase F)

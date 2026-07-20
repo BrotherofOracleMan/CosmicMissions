@@ -2,7 +2,7 @@
 
 A practical pytest checklist for testing your FastAPI cosmic missions API, mapped to what you already have and what to add next as you learn.
 
-**Next:** see [upgrade-roadmap.md](upgrade-roadmap.md) for Azure deployment (Step 9). Stubs/mocks remain optional.
+**Next:** Azure Phases 0–C + D1 are done — see [upgrade-roadmap.md](upgrade-roadmap.md) Step 9 for D2 (Managed Identity), E polish, and Terraform. Stubs/mocks remain optional.
 
 For every endpoint, think in three layers: **did the HTTP response behave correctly?**, **is the JSON body right?**, and **did side effects happen** (DB changed, etc.)?
 
@@ -26,6 +26,7 @@ The status code is the contract. Clients depend on it more than the body.
 | Not found | `404` | `GET /cosmic-missions/999999` |
 | Conflict | `409` | Duplicate `mission_id` on POST |
 | Bad input | `422` | Missing required field, wrong type (`mission_id: "abc"`) |
+| Unauthorized | `401` | Missing or wrong `X-API-KEY` on `/cosmic-missions` (real app; tests override auth) |
 
 **Pattern** (use the `client_with_rollback` fixture from `conftest.py`):
 
@@ -187,8 +188,9 @@ docker exec -it fastapi_postgres_db psql -U postgres -d cosmic_missions_test_db 
 5. **Edge cases** (null telemetry, empty list)
 6. **Done:** test markers (`unit` / `integration`), coverage, GitHub Actions CI — see Step 7 in [upgrade-roadmap.md](upgrade-roadmap.md)
 7. **Done:** foreign keys + nested crew routes — Step 8
-8. **Optional:** stubs and mocks — deepen what `dependency_overrides` already does (see section 10)
-9. **Next / Final:** deploy API + Postgres to Azure — Step 9
+8. **Done:** Azure deploy Phases 0–C + API key (D1) — Step 9
+9. **Optional:** stubs and mocks — deepen what `dependency_overrides` already does (see section 10)
+10. **Next:** Managed Identity for Postgres (D2), CI/CD polish (E), Terraform (F)
 
 ---
 
@@ -198,7 +200,7 @@ Prefer **real Postgres + rollback** for CRUD. Add stubs/mocks when you need spee
 
 | Priority | Technique | Use when |
 |----------|-----------|----------|
-| 1 | **`dependency_overrides`** | Swap any `Depends(...)` (you already override `get_db`) |
+| 1 | **`dependency_overrides`** | Swap any `Depends(...)` (you already override `get_db` and `get_api_key`) |
 | 2 | **Stub / `MagicMock` Session** | Unit-test route/service logic without Postgres |
 | 3 | **`unittest.mock.patch` / `pytest-mock`** | Isolate a module-level helper or SDK constructed inside a function |
 | 4 | **Stub external clients** | Azure Blob, email, outbound `httpx` — later, when those exist |
@@ -277,7 +279,7 @@ Rollback still cleans up both tables. See [upgrade-roadmap.md](upgrade-roadmap.m
 
 ---
 
-## 13. Azure deployment (final step)
+## 13. Azure deployment + API key
 
 Local pytest and Azure production are **different environments**:
 
@@ -285,27 +287,37 @@ Local pytest and Azure production are **different environments**:
 |---|------------|------------------|
 | API | `TestClient` / `uvicorn` on your machine | App Service URL (`*.azurewebsites.net`) |
 | Database | Docker or CI Postgres container | PostgreSQL Flexible Server |
-| Config | `.env` / workflow `env:` | App Service Application settings |
+| Config | `.env` / workflow `env:` | App Service Environment variables |
+| Auth | `get_api_key` overridden in `conftest` | Real `X-API-KEY` vs `API_KEY` setting |
 | Tests | `pytest` with `TEST_DATABASE_URL` | Run in CI only — not against prod DB |
 
-Before calling Azure "done", smoke-test the deployed API the same way you test locally:
+Smoke-test the deployed API:
 
 ```bash
+# open
+curl https://<your-app>.azurewebsites.net/health
+
+# expect 401
 curl https://<your-app>.azurewebsites.net/cosmic-missions
+
+# expect 200
+curl https://<your-app>.azurewebsites.net/cosmic-missions \
+  -H "X-API-KEY: $API_KEY"
 ```
 
-Use `/docs` for interactive checks. CI runs automatically on push to `main` — check the **Actions** tab on GitHub or run `gh run view --log` locally.
+CI runs **Test** + **Deploy** on push to `main` — check the **Actions** tab or `gh run list`.
 
-See [upgrade-roadmap.md](upgrade-roadmap.md) Step 9 for Azure database setup, `sslmode=require`, startup commands, and deploy CI/CD.
+See [upgrade-roadmap.md](upgrade-roadmap.md) Step 9 for current Azure status (D2 / E / F next).
 
 ---
 
-You have **58 tests** with markers, ~99% coverage on `src/`, nested crew routes, and GitHub Actions CI on push to `main`. Good next additions:
+You have **58 tests** with markers, ~99% coverage on `src/`, nested crew routes, API key auth (overridden in tests), Azure App Service + Flexible Server, and GitHub Actions CI/CD on push to `main`. Good next additions:
 
-1. Deploy to Azure (App Service + PostgreSQL Flexible Server) — Step 9
-2. Stubs and mocks (optional) — useful when you add Azure SDKs / outbound I/O
-3. `status_code=201` on POST if you polish the API contract
-4. Optional CI tweaks: `pull_request` trigger, coverage in the workflow
+1. Managed Identity for App Service → Postgres (Phase D2)
+2. Gate deploy on Test workflow success (Phase E polish)
+3. Stubs and mocks (optional) — useful when you add Azure SDKs / outbound I/O
+4. `status_code=201` on POST if you polish the API contract
+5. Terraform (`infra/`) — Phase F
 
 Run the suite with:
 
