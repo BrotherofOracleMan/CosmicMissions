@@ -9,6 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from database import get_db
+from auth import get_api_key
 from main import app
 from payloads.missions import (
     APOLLO_11,
@@ -49,10 +50,15 @@ def db_session():
     transaction.rollback()
     connection.close()
 
+
+
 @pytest.fixture
 def client_with_rollback(db_session):
     def override_get_db():
         yield db_session
+    def override_get_api_key():
+        return "super-secret-token"
+    app.dependency_overrides[get_api_key] = override_get_api_key
     app.dependency_overrides[get_db] = override_get_db
     with TestClient(app) as test_client:
         yield test_client

@@ -5,8 +5,9 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models import CosmicMission, CrewMember
 from schemas import CosmicMissionBase, CosmicMissionCreate, CosmicMissionPut, CosmicMissionUpdate, CrewMemberBase, CrewMemberCreate
+from auth import get_api_key
 
-router = APIRouter(prefix="/cosmic-missions", tags=["cosmic-missions"])
+router = APIRouter(prefix="/cosmic-missions", tags=["cosmic-missions"], dependencies=[Depends(get_api_key)])
 
 @router.get("", response_model=list[CosmicMissionBase])
 def get_cosmic_missions(db: Session = Depends(get_db)):

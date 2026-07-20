@@ -1,6 +1,7 @@
-from fastapi import  FastAPI
-
+from auth import get_api_key
 from routers import router as cosmic_missions_router
+import os
+from fastapi import FastAPI, Depends, HTTPException
 
 app=FastAPI()
 
