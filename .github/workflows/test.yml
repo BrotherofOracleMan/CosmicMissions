@@ -5,9 +5,7 @@ env:
   TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/cosmic_missions_test_db
 
 on:
-  push:
-    branches:
-      - main
+  workflow_call:
 
 jobs:
   test:
