@@ -10,10 +10,25 @@ anyio==4.14.0
     #   starlette
 asyncpg==0.31.0
     # via fastapi-azure
+azure-core==1.41.0
+    # via azure-identity
+azure-identity==1.25.3
+    # via fastapi-azure
+certifi==2026.6.17
+    # via requests
+cffi==2.1.0 ; platform_python_implementation != 'PyPy'
+    # via cryptography
+charset-normalizer==3.4.9
+    # via requests
 click==8.4.1
     # via uvicorn
 colorama==0.4.6 ; sys_platform == 'win32'
     # via click
+cryptography==49.0.0
+    # via
+    #   azure-identity
+    #   msal
+    #   pyjwt
 fastapi==0.137.2
     # via fastapi-azure
 greenlet==3.5.2 ; platform_machine == 'AMD64' or platform_machine == 'WIN32' or platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'ppc64le' or platform_machine == 'win32' or platform_machine == 'x86_64'
@@ -30,16 +45,31 @@ idna==3.18
     # via
     #   anyio
     #   httpx2
+    #   requests
+msal==1.37.0
+    # via
+    #   azure-identity
+    #   msal-extensions
+msal-extensions==1.3.1
+    # via azure-identity
 psycopg2-binary==2.9.12
     # via fastapi-azure
+pycparser==3.0 ; implementation_name != 'PyPy' and platform_python_implementation != 'PyPy'
+    # via cffi
 pydantic==2.13.4
     # via
     #   fastapi
     #   fastapi-azure
 pydantic-core==2.46.4
     # via pydantic
+pyjwt==2.13.0
+    # via msal
 python-dotenv==1.2.2
     # via fastapi-azure
+requests==2.34.2
+    # via
+    #   azure-core
+    #   msal
 sqlalchemy==2.0.51
     # via fastapi-azure
 starlette==1.3.1
@@ -50,6 +80,8 @@ truststore==0.10.4
     #   httpx2
 typing-extensions==4.15.0
     # via
+    #   azure-core
+    #   azure-identity
     #   fastapi
     #   pydantic
     #   pydantic-core
@@ -59,5 +91,7 @@ typing-inspection==0.4.2
     # via
     #   fastapi
     #   pydantic
+urllib3==2.7.0
+    # via requests
 uvicorn==0.49.0
     # via fastapi-azure

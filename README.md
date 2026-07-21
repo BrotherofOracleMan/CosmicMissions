@@ -197,6 +197,6 @@ gh run view --log
 - [x] Azure App Service + PostgreSQL Flexible Server (Phases 0–C)
 - [x] API key auth (`X-API-KEY` / Phase D1)
 - [x] GitHub Actions deploy to Azure (OIDC)
-- [ ] Managed Identity App Service → Postgres (Phase D2)
+- [x] Managed Identity App Service → Postgres (Phase D2)
 - [ ] Gate deploy on test success / CI polish (Phase E)
 - [ ] Terraform IaC (Phase F)

@@ -372,7 +372,7 @@ flowchart TD
 | 7 | Markers, coverage, CI | L | Done |
 | 8 | Foreign keys and related tables (`crew_members`) | M–L | Done |
 | 7b | Stubs and mocks (optional skill) | S–M | Optional / anytime |
-| 9 | Deploy to Azure (portal → auth → CI/CD → Terraform) | L | In progress — 0–C + D1 done; D2 / E polish / F next |
+| 9 | Deploy to Azure (portal → auth → CI/CD → Terraform) | L | In progress — 0–D2 done; E polish / F next |
 
 ---
 
@@ -625,7 +625,7 @@ Your app already reads `DATABASE_URL` (and `API_KEY`) from the environment — t
 | B — App Service | **Done** | Web App `rg-cosmic-missions`, Python 3.13, Free plan; `DATABASE_URL`, `PYTHONPATH=src`, startup `uvicorn` |
 | C — Verify | **Done** | `/health`, CRUD, crew smoke-tested on Azure |
 | D1 — API key | **Done** | `src/auth.py` + router `dependencies`; `API_KEY` in `.env` / Azure; pytest overrides `get_api_key` |
-| D2 — Managed Identity → Postgres | **Next** | Still using password in `DATABASE_URL` |
+| D2 — Managed Identity → Postgres | **Done** | System MI + Postgres role; `database.py` uses token when `DATABASE_URL` unset |
 | E — CI/CD polish | **Partial** | Deploy workflow exists; not yet gated on the Test job |
 | F — Terraform | **Not started** | |
 
@@ -750,23 +750,29 @@ curl https://<app-host>/cosmic-missions -H "X-API-KEY: $API_KEY"
 
 Optional stretch: dedicated unit tests for missing/wrong key → `401`.
 
-#### D2 — Database authentication (App Service → Postgres) (Next)
+#### D2 — Database authentication (App Service → Postgres) (Done — code path)
 
-Graduate off a long-lived password in `DATABASE_URL`:
+App Service uses **system-assigned Managed Identity** to get an Entra token; Postgres role `rg-cosmic-missions` was granted CONNECT + CRUD.
 
-1. Enable **system-assigned Managed Identity** on the Web App
-2. Create a Postgres role for that identity (Azure AD authentication on Flexible Server)
-3. Grant the role rights on `cosmic_missions_db` / tables
-4. Connect with Azure AD token / identity-based connection (no password in the URL)
-5. Optional: move remaining secrets to **Key Vault** references
+**What shipped:**
+
+| Piece | Detail |
+|-------|--------|
+| Web App identity | System-assigned On |
+| Postgres | Entra + password auth; Entra admin set; role `rg-cosmic-missions` + grants |
+| Code | [`src/database.py`](../src/database.py) — if `DATABASE_URL` set → password (local/CI); else `DBHOST`/`DBNAME`/`DBUSER` + `DefaultAzureCredential` |
+| Azure env | `DBHOST`, `DBNAME`, `DBUSER=rg-cosmic-missions`; leave `DATABASE_URL` **unset** on App Service |
+| Local | Keep `DATABASE_URL` in `.env` (Docker password) |
 
 ```text
-App Service (Managed Identity)  --AAD token-->  Flexible Server
+App Service (Managed Identity)  --Entra token-->  Flexible Server (role rg-cosmic-missions)
 ```
 
-Why this second: you already have a working deploy; swapping how the app authenticates to Postgres is a focused networking/identity lesson without redoing the API.
+Optional stretch: switch Postgres to **Entra authentication only** after confirming MI works; Key Vault for `API_KEY`.
 
 Never commit API keys or DB passwords. Rotate anything that appeared in chat, screenshots, or shared docs.
+
+---
 
 ---
 
@@ -871,12 +877,12 @@ Mostly portal/CLI wiring, networking, auth, CI, and IaC — not large Python rew
 
 ### Immediate next actions
 
-1. ~~Phases 0–C + D1~~ (done)
-2. Point local `.env` `DATABASE_URL` back to Docker when not cloud-testing
-3. Stop/delete Azure Postgres when idle to control cost (~B1ms)
-4. **Phase D2:** Managed Identity for App Service → Postgres (drop password from `DATABASE_URL`)
+1. ~~Phases 0–D2~~ (done once Azure MI env is live and password `DATABASE_URL` removed on App Service)
+2. Confirm live API after deploy (`/health` + keyed `/cosmic-missions`)
+3. Point local `.env` `DATABASE_URL` at Docker when not cloud-testing
+4. Stop Azure Postgres when idle to control cost
 5. **Phase E polish:** gate deploy on Test workflow success
-6. **Phase F:** encode stack in `infra/` with Terraform (`plan` / `apply` / `destroy`)
+6. **Phase F:** encode stack in `infra/` with Terraform
 
 ### Optional stretch goals
 
