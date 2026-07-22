@@ -103,7 +103,7 @@ tests/
   test_database.py
 ```
 
-`.github/workflows/test.yml` runs the full suite on every push to `main` via a Postgres service container.
+`.github/workflows/test.yml` is a reusable workflow (`workflow_call`) that runs the full suite via a Postgres service container. The deploy workflow calls it on every push to `main` before shipping.
 
 ### Problems this solved
 
@@ -116,7 +116,7 @@ tests/
 | Duplicated assertions | Repeated checks live in `tests/assertions.py` |
 | Fixture duplication | PUT/PATCH/DELETE setup uses shared fixtures from `conftest.py` |
 | Manual DELETE teardown | Per-test transaction rollback replaces `client.delete(...)` after fixtures |
-| CI automation | GitHub Actions runs `pytest` on push to `main` with ephemeral Postgres |
+| CI automation | GitHub Actions runs `pytest` (reusable `test.yml`) before deploy with ephemeral Postgres |
 
 ### Test database isolation (done)
 
@@ -372,7 +372,7 @@ flowchart TD
 | 7 | Markers, coverage, CI | L | Done |
 | 8 | Foreign keys and related tables (`crew_members`) | M–L | Done |
 | 7b | Stubs and mocks (optional skill) | S–M | Optional / anytime |
-| 9 | Deploy to Azure (portal → auth → CI/CD → Terraform) | L | In progress — 0–D2 done; E polish / F next |
+| 9 | Deploy to Azure (portal → auth → CI/CD → Terraform) | L | In progress — 0–E done; F next |
 
 ---
 
@@ -471,7 +471,7 @@ After rollback is in place, you should not need this routinely.
 
 ## Step 7: Markers, coverage, CI (Done)
 
-Step 7 made the suite faster to run in subsets, measurable with coverage, and automatic on every push to `main`.
+Step 7 made the suite faster to run in subsets, measurable with coverage, and automatic in CI (now called from the deploy workflow before ship).
 
 ### Part A: Test markers (done)
 
@@ -512,21 +512,27 @@ Coverage is a guide, not a goal by itself — use it to spot untested branches a
 
 ### Part C: CI pipeline — GitHub Actions (done)
 
-Workflow file: `.github/workflows/test.yml`
+Reusable workflow: `.github/workflows/test.yml` (`on: workflow_call`)  
+Caller: `.github/workflows/main_rg-cosmic-missions.yml` (`test: uses: …` then `deploy: needs: [build, test]`)
 
 ```mermaid
 flowchart LR
-    push[Push to main] --> gha[GitHub Actions ubuntu-latest]
-    gha --> pg[(Postgres 15 service container)]
-    gha --> setup[uv sync + psql create DB/table]
+    push[Push to main] --> caller[Deploy workflow]
+    caller --> testJob[Reusable test.yml]
+    testJob --> pg[(Postgres 15 service container)]
+    testJob --> setup[uv sync + psql create DB/table]
     setup --> pytest[uv run pytest]
-    pytest --> result[Pass or fail on Actions tab]
+    caller --> build[build]
+    pytest --> gate{tests pass?}
+    build --> gate
+    gate -->|yes| deploy[deploy to App Service]
+    gate -->|no| stop[Deploy skipped]
 ```
 
-What the workflow does on each push to `main`:
+What the reusable test workflow does:
 
 1. Starts a `postgres:15` service container with health checks
-2. Sets `DATABASE_URL` and `TEST_DATABASE_URL` to the CI test database
+2. Sets `DATABASE_URL` and `TEST_DATABASE_URL` to the CI test database only (never Azure prod)
 3. Checks out code, installs `uv`, runs `uv sync`
 4. Installs `postgresql-client`, creates `cosmic_missions_test_db`, runs `create_cosmic_missions_table.sql` then `create_crew_members_table.sql`
 5. Runs `uv run pytest` (all 58 tests)
@@ -537,8 +543,8 @@ View results: GitHub repo → **Actions** tab, or locally with `gh run list` / `
 Local (your Mac)          CI (GitHub runner)
 ─────────────────         ──────────────────
 Docker Postgres           Postgres service container
-.env credentials          workflow env: block
-You run pytest            Runs on push to main
+.env credentials          test.yml env: block
+You run pytest            Called via workflow_call before deploy
 ```
 
 ### Optional CI enhancements (not implemented)
@@ -626,12 +632,12 @@ Your app already reads `DATABASE_URL` (and `API_KEY`) from the environment — t
 | C — Verify | **Done** | `/health`, CRUD, crew smoke-tested on Azure |
 | D1 — API key | **Done** | `src/auth.py` + router `dependencies`; `API_KEY` in `.env` / Azure; pytest overrides `get_api_key` |
 | D2 — Managed Identity → Postgres | **Done** | System MI + Postgres role; `database.py` uses token when `DATABASE_URL` unset |
-| E — CI/CD polish | **Partial** | Deploy workflow exists; not yet gated on the Test job |
+| E — CI/CD polish | **Done** | Deploy `needs: [build, test]`; reusable `test.yml`; `TEST_DATABASE_URL` in test job only |
 | F — Terraform | **Not started** | |
 
 **Live hostname (example):** `https://rg-cosmic-missions-cghta5dsfxb5fven.canadacentral-01.azurewebsites.net`  
-**Deploy workflow:** `.github/workflows/main_rg-cosmic-missions.yml` (OIDC + user-assigned identity `oidc-msi-ad6c`)  
-**Test workflow:** `.github/workflows/test.yml` (unchanged — CI Postgres only)
+**Deploy workflow:** `.github/workflows/main_rg-cosmic-missions.yml` (OIDC + user-assigned identity `oidc-msi-ad6c`; calls test before deploy)  
+**Test workflow:** `.github/workflows/test.yml` (`workflow_call` — CI Postgres / `TEST_DATABASE_URL` only)
 
 ### Target architecture
 
@@ -776,14 +782,17 @@ Never commit API keys or DB passwords. Rotate anything that appeared in chat, sc
 
 ---
 
-### Phase E — CI/CD deploy (Partial — deploy works)
+### Phase E — CI/CD deploy (Done)
 
-**Done:** `.github/workflows/main_rg-cosmic-missions.yml` builds and deploys to App Service on push to `main` (OIDC).
+**Done:**
 
-**Still optional / next polish:**
+- `.github/workflows/main_rg-cosmic-missions.yml` builds and deploys to App Service on push to `main` (OIDC) or `workflow_dispatch`
+- Deploy is gated: `test` job calls reusable `.github/workflows/test.yml`, then `deploy: needs: [build, test]` so broken tests never ship
+- `TEST_DATABASE_URL` stays in the **test** workflow only (CI Postgres) — pytest never points at Azure prod
 
-- Make deploy `needs:` the Test workflow (or a test job) so broken tests never ship
-- Keep `TEST_DATABASE_URL` in the **test** job only — never point pytest at Azure prod
+```text
+push to main → test (reusable test.yml) + build → deploy (only if both succeed)
+```
 
 ---
 
@@ -877,12 +886,11 @@ Mostly portal/CLI wiring, networking, auth, CI, and IaC — not large Python rew
 
 ### Immediate next actions
 
-1. ~~Phases 0–D2~~ (done once Azure MI env is live and password `DATABASE_URL` removed on App Service)
+1. ~~Phases 0–E~~ (done — deploy gated on reusable test workflow)
 2. Confirm live API after deploy (`/health` + keyed `/cosmic-missions`)
 3. Point local `.env` `DATABASE_URL` at Docker when not cloud-testing
 4. Stop Azure Postgres when idle to control cost
-5. **Phase E polish:** gate deploy on Test workflow success
-6. **Phase F:** encode stack in `infra/` with Terraform
+5. **Phase F:** encode stack in `infra/` with Terraform
 
 ### Optional stretch goals
 

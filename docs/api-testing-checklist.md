@@ -2,7 +2,7 @@
 
 A practical pytest checklist for testing your FastAPI cosmic missions API, mapped to what you already have and what to add next as you learn.
 
-**Next:** Azure Phases 0–C + D1 are done — see [upgrade-roadmap.md](upgrade-roadmap.md) Step 9 for D2 (Managed Identity), E polish, and Terraform. Stubs/mocks remain optional.
+**Next:** Azure Phases 0–E are done — see [upgrade-roadmap.md](upgrade-roadmap.md) Step 9 for Phase F (Terraform). Stubs/mocks remain optional.
 
 For every endpoint, think in three layers: **did the HTTP response behave correctly?**, **is the JSON body right?**, and **did side effects happen** (DB changed, etc.)?
 
@@ -159,7 +159,7 @@ What that means in practice:
 - Route handlers still call `db.commit()`, but savepoints prevent those commits from persisting past the test
 - Fixtures create data via POST; you do **not** need `DELETE` teardown in fixtures anymore
 - `client_with_rollback` is the shared fixture — inject it into every test that hits the API
-- **CI** (`.github/workflows/test.yml`) runs all 58 tests on push to `main` using an ephemeral Postgres container on GitHub's runners — same `TEST_DATABASE_URL` pattern, no `.env` file
+- **CI** — reusable `.github/workflows/test.yml` (`workflow_call`) runs all 58 tests on an ephemeral Postgres container on GitHub's runners before deploy — same `TEST_DATABASE_URL` pattern, no `.env` file, never Azure prod
 
 ```mermaid
 flowchart LR
@@ -305,19 +305,18 @@ curl https://<your-app>.azurewebsites.net/cosmic-missions \
   -H "X-API-KEY: $API_KEY"
 ```
 
-CI runs **Test** + **Deploy** on push to `main` — check the **Actions** tab or `gh run list`.
+CI on push to `main`: **test** (reusable `test.yml`) + **build**, then **deploy** only if both succeed (`needs: [build, test]`). Check the **Actions** tab or `gh run list`.
 
-See [upgrade-roadmap.md](upgrade-roadmap.md) Step 9 for current Azure status (D2 / E / F next).
+See [upgrade-roadmap.md](upgrade-roadmap.md) Step 9 for current Azure status (F next).
 
 ---
 
-You have **58 tests** with markers, ~99% coverage on `src/`, nested crew routes, API key auth (overridden in tests), Azure App Service + Flexible Server, and GitHub Actions CI/CD on push to `main`. Good next additions:
+You have **58 tests** with markers, ~99% coverage on `src/`, nested crew routes, API key auth (overridden in tests), Azure App Service + Flexible Server, Managed Identity DB auth, and GitHub Actions CI/CD gated on tests. Good next additions:
 
-1. Managed Identity for App Service → Postgres (Phase D2)
-2. Gate deploy on Test workflow success (Phase E polish)
-3. Stubs and mocks (optional) — useful when you add Azure SDKs / outbound I/O
-4. `status_code=201` on POST if you polish the API contract
-5. Terraform (`infra/`) — Phase F
+1. Terraform (`infra/`) — Phase F
+2. Stubs and mocks (optional) — useful when you add Azure SDKs / outbound I/O
+3. `status_code=201` on POST if you polish the API contract
+4. Add `pull_request:` trigger so PRs run tests before merge
 
 Run the suite with:
 

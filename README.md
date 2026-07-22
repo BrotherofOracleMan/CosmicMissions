@@ -9,7 +9,7 @@ A learning-focused FastAPI CRUD API backed by PostgreSQL (missions + nested crew
 - **Pydantic** for request/response validation
 - **API key auth** (`X-API-KEY` via `src/auth.py`)
 - **pytest** with per-test transaction rollback
-- **GitHub Actions** CI (`test.yml`) + Azure deploy (`main_rg-cosmic-missions.yml`)
+- **GitHub Actions** CI/CD — reusable `test.yml` gated before Azure deploy (`main_rg-cosmic-missions.yml`)
 - **Azure:** App Service (Python 3.13) + PostgreSQL Flexible Server
 
 ## Project structure
@@ -37,8 +37,8 @@ docs/
 
 .github/
   workflows/
-    test.yml                      # CI: Postgres service + pytest
-    main_rg-cosmic-missions.yml   # CD: build + deploy to App Service
+    test.yml                      # Reusable: Postgres service + pytest
+    main_rg-cosmic-missions.yml   # test → build → deploy (needs tests)
 ```
 
 ## Prerequisites
@@ -168,10 +168,11 @@ pytest --cov=src --cov-report=term-missing
 
 ## CI / CD (GitHub Actions)
 
-On every push to `main`:
+On every push to `main` (or manual **Run workflow**):
 
-- **Test** (`.github/workflows/test.yml`): Postgres 15 service → create tables → `uv run pytest`
-- **Deploy** (`.github/workflows/main_rg-cosmic-missions.yml`): build → OIDC login → App Service
+1. **Test** — reusable workflow `.github/workflows/test.yml` (`workflow_call`): Postgres 15 service → create tables → `uv run pytest` (`TEST_DATABASE_URL` → CI Postgres only, never Azure)
+2. **Build** — package the app artifact
+3. **Deploy** — OIDC login → App Service (`needs: [build, test]` so broken tests never ship)
 
 View results on GitHub → **Actions** tab, or locally:
 
@@ -182,7 +183,7 @@ gh run view --log
 
 ## Learning docs
 
-- [docs/upgrade-roadmap.md](docs/upgrade-roadmap.md) — evolution + Azure Phases 0–F (0–C + D1 done)
+- [docs/upgrade-roadmap.md](docs/upgrade-roadmap.md) — evolution + Azure Phases 0–F (0–E done; F next)
 - [docs/api-testing-checklist.md](docs/api-testing-checklist.md) — pytest patterns and what to assert
 
 ## Roadmap
@@ -198,5 +199,5 @@ gh run view --log
 - [x] API key auth (`X-API-KEY` / Phase D1)
 - [x] GitHub Actions deploy to Azure (OIDC)
 - [x] Managed Identity App Service → Postgres (Phase D2)
-- [ ] Gate deploy on test success / CI polish (Phase E)
+- [x] Gate deploy on test success (Phase E) — reusable `test.yml` + `needs: [build, test]`
 - [ ] Terraform IaC (Phase F)
