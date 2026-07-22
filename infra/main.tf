@@ -40,11 +40,13 @@ resource "azurerm_service_plan" "asp" {
 # Linux Web App — hosts FastAPI (uvicorn). Does NOT deploy your code by itself.
 # GitHub Actions / Deployment Center comes later (leave alone for now).
 #
-# Still missing / nice-to-have on this resource:
-#   - python_version = "3.13" to match prod (currently 3.10)
-#   - app_command_line / startup: uvicorn main:app --host 0.0.0.0 --port 8000
-#   - DBHOST should eventually use the Flexible Server FQDN from an output,
-#     not a hard-coded var that points at a different server name
+# Since last commit you added:
+#   - python_version = "3.13" (matches prod)
+#   - app_command_line startup for uvicorn
+#
+# Still open:
+#   - DBHOST still uses var.dbhost (placeholder). Prefer the Flexible Server
+#     FQDN from an output / reference once apply succeeds
 # -----------------------------------------------------------------------------
 resource "azurerm_linux_web_app" "webapp" {
   name                = "webapp-terraform-azure" # must be globally unique
@@ -56,11 +58,14 @@ resource "azurerm_linux_web_app" "webapp" {
   depends_on = [azurerm_service_plan.asp]
 
   site_config {
+    # Startup command (same idea as App Service Configuration → General settings)
+    app_command_line = "uvicorn main:app --host 0.0.0.0 --port 8000"
     application_stack {
-      python_version = "3.10"
+      python_version = "3.13"
     }
   }
 
+  # These become App Service → Environment variables after apply
   app_settings = {
     "API_KEY"                        = var.api_key
     "DBHOST"                         = var.dbhost
@@ -72,14 +77,7 @@ resource "azurerm_linux_web_app" "webapp" {
 }
 
 # -----------------------------------------------------------------------------
-# PostgreSQL Flexible Server — the database *server* (not the database yet)
-#
-# Still missing after this resource:
-#   1. azurerm_postgresql_flexible_server_database  — create cosmic_missions_db
-#   2. azurerm_postgresql_flexible_server_firewall_rule — allow your IP / Azure services
-#   3. outputs.tf — export FQDN so Web App DBHOST can reference it
-#   4. SQL schema — run sql_files/*.sql via psql after apply (Terraform won't)
-#   5. Managed Identity (App Service → Postgres) — optional stretch; password is fine for learning
+# PostgreSQL Flexible Server — the database *server* (compute + storage)
 #
 # Notes:
 #   - administrator_login is the *server admin*, not the same as App Service DBUSER/MI role
@@ -101,13 +99,42 @@ resource "azurerm_postgresql_flexible_server" "db" {
 }
 
 # -----------------------------------------------------------------------------
-# NEXT (add below when ready):
+# Database *inside* the Flexible Server
+# Empty DB only — run sql_files/*.sql via psql after apply.
+# Name comes from var.dbname (default: cosmic_missions_db).
+# -----------------------------------------------------------------------------
+resource "azurerm_postgresql_flexible_server_database" "app" {
+  name      = var.dbname
+  server_id = azurerm_postgresql_flexible_server.db.id
+  charset   = "UTF8"
+  collation = "en_US.utf8"
+}
+
+# -----------------------------------------------------------------------------
+# Firewall rules
 #
-# resource "azurerm_postgresql_flexible_server_database" "app" { ... }
-# resource "azurerm_postgresql_flexible_server_firewall_rule" "allow_azure" { ... }
-# resource "azurerm_postgresql_flexible_server_firewall_rule" "allow_my_ip" { ... }
-#
-# Then in outputs.tf:
-#   output "postgres_fqdn" { value = azurerm_postgresql_flexible_server.db.fqdn }
-#   output "webapp_url"    { value = "https://${azurerm_linux_web_app.webapp.default_hostname}" }
+# allow_azure: 0.0.0.0–0.0.0.0 = "Allow Azure services" (App Service → Postgres)
+# allow_my_ip: your current public IP so local psql works
+#   (update this if your ISP changes your IP)
+# -----------------------------------------------------------------------------
+resource "azurerm_postgresql_flexible_server_firewall_rule" "allow_azure" {
+  name             = "allow-azure"
+  server_id        = azurerm_postgresql_flexible_server.db.id
+  start_ip_address = "0.0.0.0"
+  end_ip_address   = "0.0.0.0"
+}
+
+resource "azurerm_postgresql_flexible_server_firewall_rule" "allow_my_ip" {
+  name             = "allow-my-ip"
+  server_id        = azurerm_postgresql_flexible_server.db.id
+  start_ip_address = "136.52.60.94"
+  end_ip_address   = "136.52.60.94"
+}
+
+# -----------------------------------------------------------------------------
+# Still to do:
+#   1. outputs.tf — uncomment postgres_fqdn / webapp_url; wire DBHOST from FQDN
+#   2. After apply: run sql_files/*.sql via psql
+#   3. GitHub deploy to this Web App (when you're ready)
+#   4. Managed Identity App Service → Postgres (optional stretch)
 # -----------------------------------------------------------------------------
